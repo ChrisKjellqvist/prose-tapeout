@@ -31,9 +31,7 @@ certain network structures (ex. multi-head attention), fill and drain penalties 
 This is also why we see systolic array architectures (ex. TPU) excel at CNNs but lag behind GPUs when it comes
 to attention-based networks.
 
-<p align="center">
 ![](img/layout.jpg)
-</p>
 
 ProSE proposes the use of a series of lock-step, smaller systolic arrays with the following repercussions.
 1. Weights are broadcasted to each systolic array, increasing memory re-use even for smaller arrays.
