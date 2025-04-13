@@ -13,4 +13,4 @@ systems and showing this "regime" change between memory bound and computationall
 given the Bytes-per-OP for a program, we can know roughly how it will behave on the architecture. For the case of
 output stationary systolic arrays, we can look at the following plot.
 
-![](img/roofline-alone.pdf)
+![](img/roofline-alone.jpg)
