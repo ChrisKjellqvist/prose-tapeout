@@ -10,7 +10,7 @@ of systolic arrays under memory bandwidth limitations so we thought it would be 
 
 [Roofline models](https://en.wikipedia.org/wiki/Roofline_model) are a way of modeling bottlenecks in throughput-oriented
 systems and showing this "regime" change between memory bound and computationally bound programs. Theoretically then,
-given the Bytes-per-OP for a program, we can know roughly how it will behave on the architecture. For the case of
+given the bytes-per-OP for a program, we can know roughly how it will behave on the architecture. For the case of
 output stationary systolic arrays, consider steady state: where activation inputs (A in an A x B matrix multiply) are
 fully buffered and we are just streaming in weights (B). The maximum rate that a systolic array in such a circumstance
 can consume is `S x w` bits per cycle for w-bit operands and a S x S systolic array. So then now we have a pretty
@@ -24,7 +24,9 @@ What happens when we make our systolic array bigger (2X in each dimension)?
 5. Fill and Drain penalties increased by 2X
 
 This is great - by increasing our computational bandwidth by 4X, we're also getting more efficient compute by reading
-less from memory. This is why we see current systolic array architectures feature so few systolic arrays.
+less from memory. This is why we see current systolic array architectures feature so few systolic arrays! Doubling
+the _number_ of systolic arrays would only 2X the compute bandwidth for a 2X increase in required memory bandwidth -
+there's no additonal data re-use.
 
 Unfortunately, we might not always have twice the memory bandwidth to afford this. What's more, with
 certain network structures (ex. multi-head attention), fill and drain penalties become significant overheads.
@@ -41,7 +43,7 @@ ProSE proposes the use of a series of lock-step, smaller systolic arrays with th
 
 Regarding point 3, this may seem to be a problem, but we think it's a pretty decent tradeoff: SRAM is
 extremely dense and off-chip memory bandwidth is expensive and, itself, requires significant area for
-controllers. We present these results in a roofline plot collected from simulation using [DRAMsim3](https://github.com/umd-memsys/DRAMsim3)
+controllers.  We present these results in a roofline plot collected from simulation using [DRAMsim3](https://github.com/umd-memsys/DRAMsim3)
 for off-chip memory modeling.
 
 ![](img/roofline.jpg)

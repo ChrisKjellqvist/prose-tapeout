@@ -1,13 +1,11 @@
 package prose
 
 import beethoven.Generation.CppGeneration
-import beethoven.Platforms.FPGA.Xilinx.F2.AWSF2Platform
 import chipsalliance.rocketchip.config._
 import beethoven._
 import fpwrapper.{FPFloatFormat, FPUSourceType}
 import fpwrapper.FPUSourceType.FPUSourceType
 import prose.SpecialFunction.{EXP, SpecialFunction}
-import prose.TapeoutConfig._
 import prose.nn_util.norm.layernormtest.{WithLayerNorm, fpuLatencyBlock}
 import prose.nn_util.residual.MatAddConfig
 import prose.toplevel.{EType, GType, MType}
@@ -136,48 +134,69 @@ object GPTNEO {
 
 object FPUBuildMode extends Field[FPUSourceType]
 
-class TEST_kria_final_config extends AcceleratorConfig(
-  new WithProse(List(
-    SystolicType(
-      nCores = 2,
-      namePrefix = "E",
-      N = 2,
-      supportWideBias = true,
-      maxMatrixLen = GPTNEO.K_DIM / GPTNEO.N_HEADS,
-      Some(SpecialFunction.EXP, 2)),
-    SystolicType(
-      nCores = 2,
-      namePrefix = "M",
-      N = 8,
-      supportWideBias = true,
-      maxMatrixLen = GPTNEO.K_DIM * 4,
-      None),
-    SystolicType(
-      nCores = 2,
-      namePrefix = "G",
-      N = 4,
-      supportWideBias = false,
-      maxMatrixLen = GPTNEO.K_DIM,
-      Some(SpecialFunction.GELU, 2))
-  ),
-    fpuLatency = 4,
-    SRAMLatency = 2,
-    maxBatchSize = 2,
-    maxNDim = 4096) ++
-    new WithLayerNorm(1, GPTNEO.K_DIM, ProSEPARAMS.MAX_BATCH * 4, 4096, FPFloatFormat.Fp16Alt, fpuLats = fpuLatencyBlock(fmaLatency = 4, sqrtLUTLatency = 4, subLatency = 4)) ++
-    new MatAddConfig(1, 4, 2, 4096 * 4096 * 8))
+abstract class ProSEConfig {
+  val M_cores: Int
+  val M_sz: Int
 
-object TEST_kria_final_config extends BeethovenBuild(
-  new TEST_kria_final_config,
-  buildMode = BuildMode.Simulation,
-  platform = KriaPlatform(hasDebugAXICACHEPROT = true),
-  additional_parameter = Some({
-    case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog
-    case BQuiet => true
-  }))
+  val E_cores: Int
+  val E_sz: Int
 
+  val G_cores: Int
+  val G_sz: Int
 
-object TapeoutConfig {
+  def min_sz: Int = Math.min(G_sz, Math.min(E_sz, M_sz))
+  val max_batch_sz: Int
+  val fma_latency: Int
+  val max_output_matrix_dim: Int
+  val lut_latency: Int
+
+  def toConfig(): AcceleratorConfig = {
+    new AcceleratorConfig(
+      new WithProse(List(
+        SystolicType(
+          nCores = M_cores,
+          namePrefix = "M",
+          N = M_sz,
+          supportWideBias = true,
+          maxMatrixLen = GPTNEO.K_DIM * 4,
+          None),
+        SystolicType(
+          nCores = E_cores,
+          namePrefix = "E",
+          N = E_sz,
+          supportWideBias = true,
+          maxMatrixLen = GPTNEO.K_DIM / GPTNEO.N_HEADS * 2,
+          Some(SpecialFunction.EXP, lut_latency)),
+        SystolicType(
+          nCores = G_cores,
+          namePrefix = "G",
+          N = G_sz,
+          supportWideBias = false,
+          maxMatrixLen = GPTNEO.K_DIM,
+          specialFunc = Some(SpecialFunction.GELU, lut_latency)
+        )
+      ),
+        fpuLatency = fma_latency,
+        SRAMLatency = 2,
+        maxBatchSize = max_batch_sz,
+        maxNDim = max_output_matrix_dim) ++
+        new WithLayerNorm(1, GPTNEO.K_DIM,
+          max_batch_sz * min_sz,
+          max_output_matrix_dim,
+          FPFloatFormat.Fp16Alt,
+          fpuLats = fpuLatencyBlock(
+            fmaLatency = fma_latency,
+            sqrtLUTLatency = lut_latency,
+            subLatency = fma_latency)) ++
+        new MatAddConfig(1,
+          fma_latency,
+          min_sz,
+          max_output_matrix_dim * max_output_matrix_dim * 2),
+    )
+  }
+}
+
+class TapeoutConfigConf extends ProSEConfig {
   val M_cores = 2
   val M_sz = 8
 
@@ -187,58 +206,30 @@ object TapeoutConfig {
   val G_cores = 4
   val G_sz = 4
 
-  val min_sz = Math.min(G_sz, Math.min(E_sz, M_sz))
   val max_batch_sz = 2
   val fma_latency = 2
   val max_output_matrix_dim = 4096
   val lut_latency = 3
 }
 
-class TapeoutConfig extends AcceleratorConfig(
-  new WithProse(List(
-    SystolicType(
-      nCores = M_cores,
-      namePrefix = "M",
-      N = M_sz,
-      supportWideBias = true,
-      maxMatrixLen = GPTNEO.K_DIM * 4,
-      None),
-    SystolicType(
-      nCores = E_cores,
-      namePrefix = "E",
-      N = E_sz,
-      supportWideBias = true,
-      maxMatrixLen = GPTNEO.K_DIM / GPTNEO.N_HEADS * 2,
-      Some(SpecialFunction.EXP, lut_latency)),
-    SystolicType(
-      nCores = G_cores,
-      namePrefix = "G",
-      N = G_sz,
-      supportWideBias = false,
-      maxMatrixLen = GPTNEO.K_DIM,
-      specialFunc = Some(SpecialFunction.GELU, lut_latency)
-    )
-  ),
-    fpuLatency = fma_latency,
-    SRAMLatency = 2,
-    maxBatchSize = max_batch_sz,
-    maxNDim = max_output_matrix_dim) ++
-    new WithLayerNorm(1, GPTNEO.K_DIM,
-      max_batch_sz * min_sz,
-      max_output_matrix_dim,
-      FPFloatFormat.Fp16Alt,
-      fpuLats = fpuLatencyBlock(
-        fmaLatency = fma_latency,
-        sqrtLUTLatency = lut_latency,
-        subLatency = fma_latency)) ++
-    new MatAddConfig(1,
-      fma_latency,
-      min_sz,
-      max_output_matrix_dim * max_output_matrix_dim * 2),
-)
+class KriaConfigConf extends ProSEConfig {
+  val M_cores = 1
+  val M_sz = 4
+
+  val E_cores = 1
+  val E_sz = 2
+
+  val G_cores = 1
+  val G_sz = 2
+
+  val max_batch_sz = 2
+  val fma_latency = 3
+  val max_output_matrix_dim = 4096
+  val lut_latency = 3
+}
 
 object f2tapeoutconfig extends BeethovenBuild(
-  new TapeoutConfig(),
+  new TapeoutConfigConf().toConfig(),
   buildMode = BuildMode.Simulation,
   platform = new DirectTopTestChipPlatform(1000, 4, new n16_harvard.N16_LIB()),
   additional_parameter = Some({
@@ -247,8 +238,17 @@ object f2tapeoutconfig extends BeethovenBuild(
   })
 )
 
+object TEST_kria_final_config extends BeethovenBuild(
+  new KriaConfigConf().toConfig(),
+  buildMode = BuildMode.Synthesis,
+  platform = KriaPlatform(hasDebugAXICACHEPROT = true),
+  additional_parameter = Some({
+    case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog
+    case BQuiet => true
+  }))
+
 object tapeout extends BeethovenBuild(
-  new TapeoutConfig(),
+  new TapeoutConfigConf().toConfig(),
   buildMode = BuildMode.Synthesis,
   platform = new DirectTopTestChipPlatform(400, 4, new n16_harvard.N16_LIB(Some(Seq("ssgnp_0p72v_0p72v_m40c")))),
   additional_parameter = Some({
@@ -259,7 +259,7 @@ object tapeout extends BeethovenBuild(
 
 
 object tapeoutsim extends BeethovenBuild(
-  new TapeoutConfig(),
+  new TapeoutConfigConf().toConfig(),
   buildMode = BuildMode.Simulation,
   platform = new DirectTopTestChipPlatform(400, 4, new n16_harvard.N16_LIB(Some(Seq("ssgnp_0p72v_0p72v_m40c")))),
   additional_parameter = Some({

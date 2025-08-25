@@ -1,0 +1,14 @@
+add_library(pytorch_linear_golden pytorch_linear_golden.cpp)
+target_link_libraries(pytorch_linear_golden PRIVATE ${TORCH_LIBRARIES})
+
+add_library(pytorch_attention_golden pytorch_attention_golden.cpp)
+target_link_libraries(pytorch_attention_golden PRIVATE ${TORCH_LIBRARIES})
+
+add_library(pytorch_decoder_layer_golden pytorch_decoder_layer_golden.cpp)
+target_link_libraries(pytorch_decoder_layer_golden PRIVATE ${TORCH_LIBRARIES})
+
+add_executable(test_pytorch_linear_golden test_pytorch_linear_golden.cpp)
+target_link_libraries(test_pytorch_linear_golden PUBLIC pytorch_linear_golden)
+
+add_executable(test_pytorch_attention_golden test_pytorch_attention_golden.cpp)
+target_link_libraries(test_pytorch_attention_golden PUBLIC pytorch_attention_golden)
