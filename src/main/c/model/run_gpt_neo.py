@@ -6,15 +6,21 @@ import os
 from torch.profiler.profiler import *
 from torch.profiler import *
 from run_bert_tiny import save_tensor
-from run_bert_tiny import total_tensor_size_bytes
+import run_bert_tiny as rbt
+import sys
+import transformers
 
-do_inf = False
-do_profile = False
-save_model = True
+args = sys.argv
+
+do_inf = "-do_inf" in args
+do_profile = "-do_profile" in args
+save_model = "-save_model" in args
+max_layer_save = 1
+
 
 if __name__ == "__main__":
     model = GPTNeoForCausalLM.from_pretrained("EleutherAI/gpt-neo-125M")
-    tokenizer = GPT2Tokenizer.from_pretrained("EleutherAI/gpt-neo-125M")
+    tokenizer = GPT2Tokenizer.from_pretrained("EleutherAI/gpt-neo-125m")
 
     # Text taken without permission from https://www.math.columbia.edu/~woit/wordpress/?p=13924
     # Interesting (bearish) article about some new AI stuff for string theory
@@ -74,6 +80,8 @@ if __name__ == "__main__":
         print("Config: ", model.config)
         print("Num layers: ", len(model.transformer.h))
         for i, layer in enumerate(model.transformer.h):
+            if i == max_layer_save:
+                break
             layer_name = f"transformer.h.{i}"
             save_tensor(layer.ln_1.weight, f"{dirname}/{layer_name}_ln_1_weight.npy")
             save_tensor(layer.ln_1.bias, f"{dirname}/{layer_name}_ln_1_bias.npy")
@@ -103,9 +111,10 @@ if __name__ == "__main__":
                 f"{layer_name}_mlp_cproj_weight": layer.mlp.c_proj.weight.shape,
                 f"{layer_name}_mlp_cproj_bias": layer.mlp.c_proj.bias.shape,
             })
-        save_tensor(model.transformer.ln_f.weight, f"{dirname}/transformer_ln_f_weight.npy")
-        save_tensor(model.transformer.ln_f.bias, f"{dirname}/transformer_ln_f_bias.npy")
-        save_tensor(model.lm_head.weight, f"{dirname}/lm_head_weight.npy")
+        if i is -1:
+            save_tensor(model.transformer.ln_f.weight, f"{dirname}/transformer_ln_f_weight.npy")
+            save_tensor(model.transformer.ln_f.bias, f"{dirname}/transformer_ln_f_bias.npy")
+            save_tensor(model.lm_head.weight, f"{dirname}/lm_head_weight.npy")
         layer_dict.update({
             "transformer_ln_f_weight": model.transformer.ln_f.weight.shape,
             "transformer_ln_f_bias": model.transformer.ln_f.bias.shape,
@@ -125,4 +134,4 @@ if __name__ == "__main__":
                     k = " ".join(str(x) for x in k)
                 f.write(f"{key} {k}\n")
         print("Saved model to ", dirname)
-        print("Estimated model size is " + str(total_tensor_size_bytes / 1024 / 1024) + " MB if we were to convert to BF16")
+        print(f"Estimated model size is {(rbt.total_tensor_size_bytes / 1024 / 1024):.02f} MB if we were to convert to BF16")

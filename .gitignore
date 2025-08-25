@@ -354,3 +354,7 @@ lfsrs/
 .fpnew/*sv
 *.db
 *.sed
+.metals/
+*.npy
+*.txt
+*__pycache__*
