@@ -22,7 +22,7 @@ using namespace beethoven;
 
 
 int main() {
-  std::string model_path = "/Users/chriskjellqvist/Code/prose/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/model_ckpts";
+  std::string model_path = "/Users/chriskjellqvist/Code/prose/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/model_ckpts";
   // weight transpose can be precomputed, so don't worry about it
   auto c_fc_weight = load_tensor(model_path + "/c_fc.weight.pt").transpose(0, 1).contiguous();
   auto c_fc_bias = load_tensor(model_path + "/c_fc.bias.pt");

@@ -16,7 +16,7 @@ object SpecialFunction extends Enumeration {
   type SpecialFunction = Value
 
   def generate(ty: SpecialFunction.SpecialFunction): Unit = {
-    val base_path = os.pwd / "c_exec" / "src" / "generate_verilog"
+    val base_path = os.pwd / "src" / "main" / "c" / "generate_verilog"
     val lut_dir = os.pwd / "luts"
     // delete and remake
     os.remove.all(lut_dir / "Makefile")

@@ -353,25 +353,25 @@ std::string exec(const char* cmd) {
 // // chris work computer
 ////const std::string GLOBAL_CHECKPOINT_DIRECTORY =
 ////
-///"/Users/chriskjellqvist/Code/prose/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/model_ckpts";
+///"/Users/chriskjellqvist/Code/prose/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/model_ckpts";
 ////const std::string TEXT_CHECKPOINT_DIRECTORY =
 ////
-///"/Users/chriskjellqvist/Code/prose/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/txt_ckpts";
+///"/Users/chriskjellqvist/Code/prose/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/txt_ckpts";
 //
 //// chris home computer
 ////const std::string GLOBAL_CHECKPOINT_DIRECTORY =
 ////
-///"/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/model_ckpts";
+///"/Users/chris/Code/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/model_ckpts";
 ////const std::string TEXT_CHECKPOINT_DIRECTORY =
 ////
-///"/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/txt_ckpts";
+///"/Users/chris/Code/prose_rtl/src/main/c//prose_unit/neo_test/gen_ckpts/txt_ckpts";
 //
 //
 //// oak
 // const std::string GLOBAL_CHECKPOINT_DIRECTORY =
-// "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/model_ckpts";
+// "/home/chriskjellqvist/Code/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/model_ckpts";
 // const std::string TEXT_CHECKPOINT_DIRECTORY =
-// "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/txt_ckpts";
+// "/home/chriskjellqvist/Code/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/txt_ckpts";
 //
 //// kria
 // const std::string REMOTE_TXT_DIRECTORY = "/home/petalinux/prose_ins";
@@ -380,10 +380,10 @@ std::string get_global_checkpoint_dir() {
   auto hostname = exec("hostname");
   hostname = hostname.substr(0, hostname.size() - 1);
   if (hostname == "Christophers-MacBook-Air-2.local") {
-    return "/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/"
+    return "/Users/chris/Code/prose_rtl/src/main/c/prose_unit/neo_test/"
            "gen_ckpts/model_ckpts";
   } else if (hostname == "oak") {
-    return "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/"
+    return "/home/chriskjellqvist/Code/prose_rtl/src/main/c/prose_unit/"
            "neo_test/gen_ckpts/model_ckpts";
   } else {
     throw std::runtime_error("couldn't match hostname '" + hostname + "'");
@@ -395,10 +395,10 @@ std::string get_text_checkpoint_dir() {
   // get rid of newline
   hostname = hostname.substr(0, hostname.size() - 1);
   if (hostname == "Christophers-MacBook-Air-2.local") {
-    return "/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/"
+    return "/Users/chris/Code/prose_rtl/src/main/c/prose_unit/neo_test/"
            "gen_ckpts/txt_ckpts";
   } else if (hostname == "oak") {
-    return "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/"
+    return "/home/chriskjellqvist/Code/prose_rtl/src/main/c/prose_unit/"
            "neo_test/gen_ckpts/txt_ckpts";
   } else if (hostname == "xilinx-kv260-starterkit-20241") {
     return "/home/petalinux/prose_ins";

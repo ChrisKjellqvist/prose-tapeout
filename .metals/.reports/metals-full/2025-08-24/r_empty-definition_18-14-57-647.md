@@ -1,3 +1,14 @@
+error id: file://<WORKSPACE>/src/main/scala/prose/nn_util/norm/LayerNormCore.scala:`<none>`.
+file://<WORKSPACE>/src/main/scala/prose/nn_util/norm/LayerNormCore.scala
+empty definition using pc, found symbol in pc: `<none>`.
+empty definition using semanticdb
+empty definition using fallback
+non-local guesses:
+
+offset: 1041
+uri: file://<WORKSPACE>/src/main/scala/prose/nn_util/norm/LayerNormCore.scala
+text:
+```scala
 package prose.nn_util.norm
 
 import beethoven.Generation.CppGeneration
@@ -26,7 +37,7 @@ class LayerNormCore(maxSetSize: Int,
       case _: os.SubprocessException => // try to delete the lut directory and try again
         os.remove.all(os.pwd / "luts")
         os.makeDir.all(os.pwd / "luts")
-        os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
+        os.proc("cmake", os.pwd / "sr@@c" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
     }
     os.proc("make", "generate_invsqrt").call(cwd = os.pwd / "luts")
     os.proc("./generate_invsqrt", os.pwd / "luts").call(cwd = os.pwd / "luts")
@@ -357,3 +368,10 @@ class LayerNormCore(maxSetSize: Int,
 
   outputWrite.dataChannel.data <> layernorm.io.output
 }
+
+```
+
+
+#### Short summary: 
+
+empty definition using pc, found symbol in pc: `<none>`.

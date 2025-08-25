@@ -116,7 +116,7 @@ abstract class BaseCore(kMax: Int,
     // build the lut
     val _ = {
       os.makeDir.all(os.pwd / "luts")
-      os.proc("cmake", os.pwd / "c_exec" / "src" / "generate_verilog").call(cwd = os.pwd / "luts")
+      os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
       os.proc("make").call(cwd = os.pwd / "luts")
       os.proc("./generate_normal", os.pwd/"luts").call(cwd = os.pwd / "luts")
     }
