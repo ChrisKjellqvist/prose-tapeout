@@ -9,7 +9,6 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <vector>
 
 void print_matrix(float* f, int r, int c) {
   const int print_column_width = 12;
@@ -63,14 +62,8 @@ void convertRowMajorFormatToProSEColMajor(const uint16_t* in, uint16_t* out,
   }
 }
 
-#include <stdexcept>
-#include <bit>
-
 float bf16_to_float(uint16_t q) {
   uint32_t q_t = (uint32_t(q)) << 16;
-  if (q_t & 0x78f00000 == 0x78f00000) {
-	  throw std::runtime_error("AGH");
-  }
   return reinterpret_cast<float&>(q_t);
 }
 
@@ -124,7 +117,7 @@ void convertPCMtoTCM(const uint16_t* in, std::variant<uint16_t*, float*> out,
       int stripe_subIdx = row % TILE_WIDTH;
       auto base = stripe * local_N * TILE_WIDTH * batch_size;
       for (int col = 0; col < local_N; ++col) {
-        uint16_t ele = in[base + col * TILE_WIDTH * batch_size + b * TILE_WIDTH +
+        auto ele = in[base + col * TILE_WIDTH * batch_size + b * TILE_WIDTH +
                       stripe_subIdx];
         if (std::holds_alternative<float*>(out)) {
           std::get<float*>(out)[b * local_N * local_M + row * local_N + col] =
@@ -144,77 +137,6 @@ void convertPCMtoTCM(const uint16_t* in, std::variant<uint16_t*, float*> out,
 #include <optional>
 #include <string>
 
-#ifndef BAREMETAL
-
-void write_to_file(
-    const char* filename, const std::vector<std::pair<uint16_t*, int>>& data,
-    std::optional<std::pair<std::string, std::vector<std::string>>>
-        index_writeout) {
-  FILE* f = fopen(filename, "wb");
-  std::vector<uintptr_t> index;
-  if (!f) {
-    printf("Failed to open file %s\n", filename);
-    return;
-  }
-  uintptr_t addr = 0;
-  // always write out data in bigendian format
-  for (auto& d : data) {
-    auto dptr = d.first;
-    index.push_back(addr);
-    if (IS_BIGENDIAN) {
-      auto swapped = new uint16_t[d.second];
-      for (int i = 0; i < d.second; ++i) {
-        swapped[i] = (d.first[i] >> 8) | (d.first[i] << 8);
-      }
-      dptr = swapped;
-    }
-    fprintf(f, "@%lx\n", addr);
-    for (int i = 0; i < d.second; ++i) {
-      for (int j = 0; j < 2; ++j)
-        fprintf(f, "%02x ", 0xFF & (dptr[i] >> (8 * j)));
-      if (i % 8 == 7)
-        fprintf(f, "\n");
-    }
-
-    if (IS_BIGENDIAN) {
-      delete[] dptr;
-    }
-    fprintf(f, "\n");
-    addr += d.second * 2;
-    if (addr % 4096 != 0) {
-      addr += 4096 - (addr % 4096);
-    }
-  }
-  fclose(f);
-
-  if (index_writeout) {
-    FILE* f = fopen(index_writeout.value().first.c_str(), "w");
-    FILE* rp = fopen("prose_rptr.h", "w");
-    fprintf(rp, "#ifndef PROSE_RPTR_H\n#define PROSE_RPTR_H\n");
-    fprintf(rp, "#include <cstdint>\n");
-    fprintf(rp, "#include <beethoven/alloc.h>\n");
-    if (!f) {
-      printf("Failed to open file %s\n", index_writeout.value().first.c_str());
-      return;
-    }
-    for (int i = 0; i < index.size(); ++i) {
-      fprintf(f, "%s %lx\n", index_writeout.value().second[i].c_str(),
-              index[i]);
-      // replace all "." in name with "_"
-      std::string name = index_writeout.value().second[i];
-      std::replace(name.begin(), name.end(), '.', '_');
-      fprintf(rp, "const beethoven::remote_ptr %s(0x%lxL);\n", name.c_str(),
-              index[i]);
-    }
-    fprintf(rp, "#endif\n");
-    fprintf(f, "END: %lx\n", addr);
-    fclose(f);
-    fclose(rp);
-  }
-}
-
-#endif
-
 // https://pytorch.org/docs/stable/generated/torch.nn.GELU.html
 float gelu(float x) { return float((x * 0.5) * (1 + std::erf(x / M_SQRT2))); }
 
@@ -223,13 +145,6 @@ float truncate_float_to_bf16_accuracy(float q) {
   uint32_t masked = q_t & 0xFFFF0000;
   if (q_t & 0x8000) {
     masked += 0x10000;
-  }
-  if (masked == 0x8000000 && q != 0) {
-    masked = 0x80010000;
-    printf("ASDF\n");
-  } else if (masked == 0 && q != 0) {
-    masked = 0x00010000;
-    printf("ASDF\n");
   }
   return reinterpret_cast<float&>(masked);
 }
@@ -261,14 +176,11 @@ bool generous_is_equal(float q, float r) {
 }
 
 uint16_t float_to_bf16(float q) {
-  uint32_t q_t = reinterpret_cast<uint32_t&>(q);
-  uint16_t masked = uint16_t((q_t & 0xFFFF0000) >> 16);
-  if (masked == 0x8000 && q != 0) {
-    masked = 0x8001;
-  } else if (masked == 0 && q != 0) {
-    masked = 0x0001;
-  }
-  return masked;
+  uint32_t a = reinterpret_cast<uint32_t&>(q);
+  uint16_t b = a >> 16;
+  if (a & 0x8000)
+    b += 1;
+  return b;
 }
 
 #include <tuple>
@@ -353,25 +265,25 @@ std::string exec(const char* cmd) {
 // // chris work computer
 ////const std::string GLOBAL_CHECKPOINT_DIRECTORY =
 ////
-///"/Users/chriskjellqvist/Code/prose/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/model_ckpts";
+///"/Users/chriskjellqvist/Code/prose/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/model_ckpts";
 ////const std::string TEXT_CHECKPOINT_DIRECTORY =
 ////
-///"/Users/chriskjellqvist/Code/prose/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/txt_ckpts";
+///"/Users/chriskjellqvist/Code/prose/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/txt_ckpts";
 //
 //// chris home computer
 ////const std::string GLOBAL_CHECKPOINT_DIRECTORY =
 ////
-///"/Users/chris/Code/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/model_ckpts";
+///"/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/model_ckpts";
 ////const std::string TEXT_CHECKPOINT_DIRECTORY =
 ////
-///"/Users/chris/Code/prose_rtl/src/main/c//prose_unit/neo_test/gen_ckpts/txt_ckpts";
+///"/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/txt_ckpts";
 //
 //
 //// oak
 // const std::string GLOBAL_CHECKPOINT_DIRECTORY =
-// "/home/chriskjellqvist/Code/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/model_ckpts";
+// "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/model_ckpts";
 // const std::string TEXT_CHECKPOINT_DIRECTORY =
-// "/home/chriskjellqvist/Code/prose_rtl/src/main/c/prose_unit/neo_test/gen_ckpts/txt_ckpts";
+// "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/txt_ckpts";
 //
 //// kria
 // const std::string REMOTE_TXT_DIRECTORY = "/home/petalinux/prose_ins";
@@ -380,10 +292,10 @@ std::string get_global_checkpoint_dir() {
   auto hostname = exec("hostname");
   hostname = hostname.substr(0, hostname.size() - 1);
   if (hostname == "Christophers-MacBook-Air-2.local") {
-    return "/Users/chris/Code/prose_rtl/src/main/c/prose_unit/neo_test/"
+    return "/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/"
            "gen_ckpts/model_ckpts";
   } else if (hostname == "oak") {
-    return "/home/chriskjellqvist/Code/prose_rtl/src/main/c/prose_unit/"
+    return "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/"
            "neo_test/gen_ckpts/model_ckpts";
   } else {
     throw std::runtime_error("couldn't match hostname '" + hostname + "'");
@@ -395,10 +307,10 @@ std::string get_text_checkpoint_dir() {
   // get rid of newline
   hostname = hostname.substr(0, hostname.size() - 1);
   if (hostname == "Christophers-MacBook-Air-2.local") {
-    return "/Users/chris/Code/prose_rtl/src/main/c/prose_unit/neo_test/"
+    return "/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/"
            "gen_ckpts/txt_ckpts";
   } else if (hostname == "oak") {
-    return "/home/chriskjellqvist/Code/prose_rtl/src/main/c/prose_unit/"
+    return "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/"
            "neo_test/gen_ckpts/txt_ckpts";
   } else if (hostname == "xilinx-kv260-starterkit-20241") {
     return "/home/petalinux/prose_ins";

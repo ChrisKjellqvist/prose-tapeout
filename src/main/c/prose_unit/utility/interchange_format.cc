@@ -24,7 +24,7 @@ void interchange_format::write_floats_to_file(const std::string& fname) const {
 uint16_t* interchange_format::get_bf16_data() const {
   auto* buffer = new uint16_t[len];
   for (int i = 0; i < len; i++) {
-    const uint32_t temp = reinterpret_cast<uint32_t&>(data[i]);
+    const uint32_t temp = std::bit_cast<uint32_t, float>(data[i]);
     buffer[i] = (temp >> 16) & 0xffff;
   }
   return buffer;
@@ -56,8 +56,8 @@ interchange_format interchange_format::from_bf16_file(const std::string& fname, 
 
   float* data = new float[len];
   for (size_t i = 0; i < len; i++) {
-    uint32_t temp = uint32_t(int_buffer[i]) << 16;
-    data[i] = reinterpret_cast<float&>(temp);
+    const uint32_t temp = uint32_t(int_buffer[i]) << 16;
+    data[i] = std::bit_cast<float>(temp);
   }
   delete[] int_buffer;
   return {data, dims, len};

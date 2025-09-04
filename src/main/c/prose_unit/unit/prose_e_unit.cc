@@ -4,8 +4,9 @@
 
 #include <beethoven/fpga_handle.h>
 #include <beethoven_hardware.h>
-#include <float_wrapper.h>
 #include <variant>
+#include <float_wrapper.h>
+
 #ifndef BAREMETAL
 
 #include <random>
@@ -161,10 +162,10 @@ void test_prose_e(int chosen_batch_size,
   float *norm_vec = new float[M * chosen_batch_size];
   for (int i = 0; i < M * chosen_batch_size; ++i) {
     uint16_t p = ((uint16_t*)write_out.getHostAddr())[i];
-    // std::cout << "read " << std::hex << "0x" << p << " from mem" << std::endl;
+    std::cout << "read " << std::hex << "0x" << p << " from mem" << std::endl;
     auto q = ((uint32_t) p) << 16;
     norm_vec[i] = reinterpret_cast<float&>(q);
-    // std::cout << "AH " << norm_vec[i] << std::endl;
+    std::cout << "AH " << norm_vec[i] << std::endl;
   }
 
   uint16_t golden_cast[chosen_batch_size][M * Q];
@@ -299,16 +300,22 @@ int main() {
 #else
   printf("random seed: %x\n", seed);
   fflush(stdout);
-  // test_prose_e(1, 64, PROSE_ECore_N * 1, PROSE_ECore_N * 1, expwrap);
-  // std::cout << "PASSED" << std::endl;
-  // test_prose_e(1, 64, PROSE_ECore_N * 1, PROSE_ECore_N * 2, expwrap);
-  // std::cout << "PASSED" << std::endl;
-  // test_prose_e(1, 64, PROSE_ECore_N * 2, PROSE_ECore_N * 1, expwrap);
-  // std::cout << "PASSED" << std::endl;
-  // test_prose_e(1, 64, PROSE_ECore_N * 2, PROSE_ECore_N * 2, expwrap);
-  // std::cout << "PASSED" << std::endl;
-  test_prose_e(1, 64, PROSE_ECore_N * NCORES_E * 2, PROSE_ECore_N * 4, expwrap);
-  std::cout << "PASSED" << std::endl;
+  bool single = true;
+  for (int K = 4; K <= PROSE_kMax; K += 32) {
+    for (int j = 2; j <= 4; ++j) {
+      for (int k = 2; k <= 4; ++k) {
+        for (int batch = 1; batch <= PROSE_maxBatch; ++batch) {
+          printf("\rExecuting: K(%d) M_mult(%d), Q_mult(%d), batch(%d)", K, j, k, batch);
+          fflush(stdout);
+          for (int trial = 0; trial < n_trials; ++trial) {
+            test_prose_e(batch, K, PROSE_ECore_N * j, PROSE_ECore_N * k, expwrap);
+            if (single) goto break_out;
+          }
+        }
+      }
+    }
+  }
+  break_out:
   printf("\n\nError statistics:\n");
   print_max_err();
   printf("shutting down\n");

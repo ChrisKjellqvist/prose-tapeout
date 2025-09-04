@@ -4,14 +4,14 @@
 
 #include <beethoven/fpga_handle.h>
 #include <beethoven_hardware.h>
-#include <cmath>
-#include <float_wrapper.h>
 #include <random>
-#include <unistd.h>
+#include <float_wrapper.h>
 #include "util.h"
+#include <cmath>
 
 #ifdef PROSE
 using namespace beethoven;
+
 
 std::random_device rd;
 std::uniform_real_distribution<float> dist(-2, 2);
@@ -41,7 +41,6 @@ void test_prose_m(int chosen_batch_size,
 
   float *activation[chosen_batch_size];
   for (int i = 0; i < chosen_batch_size; ++i) activation[i] = new float[M * K];
-
   float weights[Q * K];
   float *golden_matmul[chosen_batch_size];
   for (int i = 0; i < chosen_batch_size; ++i) golden_matmul[i] = new float[Q * M];
@@ -68,7 +67,6 @@ void test_prose_m(int chosen_batch_size,
       float act = reinterpret_cast<float &>(act_hex);
       activation[b][i] = act;
       bfloat_act[b][i] = uint16_t(act_hex >> 16);
-
     }
   }
   convertRowMajorFormatToProSEColMajor((uint16_t *) bfloat_act, prose_host_act,
@@ -103,13 +101,13 @@ void test_prose_m(int chosen_batch_size,
           prose_activation_transpose,
           prose_weights,
           prose_out,
-          &prose_activation_transpose,
+          nullptr,
           PROSE_biasNONE,
           chosen_batch_size,
           M, K, Q,
           output_transpose,
           nullptr, false,
-          true);
+          false);
 
 //  prose_m_matmul(prose_activation_transpose, prose_weights, prose_out,
 //                 chosen_batch_size, M, K, Q, output_transpose);
@@ -197,21 +195,19 @@ int main() {
 //    }
 //  }
 //  }
-  // test_prose_m(1, 4, PROSE_MCore_N, PROSE_MCore_N, true);
-  // printf("\n\nshutting down peacefully. No errors found.\n");
-  //
-  // test_prose_m(1, 64, PROSE_MCore_N, PROSE_MCore_N*4, false);
-  // printf("\n\nshutting down peacefully. No errors found.\n");
-  //
-  // test_prose_m(1, 64, PROSE_MCore_N * NCORES_M, PROSE_MCore_N*4, true);
-  // printf("\n\nshutting down peacefully. No errors found.\n");
-
-  MCore::setFakeIO(0, false);
-  test_prose_m(1, 64, PROSE_MCore_N * NCORES_M * NCORES_M, PROSE_MCore_N * 2, false);
-  MCore::setFakeIO(0, false);
+  test_prose_m(1, 4, PROSE_MCore_N, PROSE_MCore_N, true);
   printf("\n\nshutting down peacefully. No errors found.\n");
-  handle.shutdown();
-  fflush(stdout);
+
+  test_prose_m(1, 64, PROSE_MCore_N, PROSE_MCore_N*4, false);
+  printf("\n\nshutting down peacefully. No errors found.\n");
+
+  test_prose_m(1, 64, PROSE_MCore_N, PROSE_MCore_N*4, true);
+  printf("\n\nshutting down peacefully. No errors found.\n");
+
+  test_prose_m(1, 64, PROSE_MCore_N, PROSE_MCore_N*4, false);
+  printf("\n\nshutting down peacefully. No errors found.\n");
+//  handle.shutdown();
+//  fflush(stdout);
 }
 
 #else

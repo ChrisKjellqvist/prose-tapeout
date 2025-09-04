@@ -134,15 +134,15 @@ torch::Tensor* multi_head_torch_tensor_to_flt_array(const torch::Tensor& tensor,
   for (int h = 0; h < n_heads; ++h) {
     auto slice = tensor.slice(slice_dim, h * adjusted_dim, (h + 1) * adjusted_dim).contiguous().clone();
     array[h] = slice;
-//    std::cout << "dim before: ";
+    std::cout << "dim before: ";
     for (int i = 0; i < dims.size(); ++i) {
       std::cout << dims[i] << " ";
     }
-//    std::cout << "\t\tdim after: ";
-//    for (int i = 0; i < dims.size(); ++i) {
-//      std::cout << slice.sizes()[i] << " ";
-//    }
-//    std::cout << std::endl;
+    std::cout << "\t\tdim after: ";
+    for (int i = 0; i < dims.size(); ++i) {
+      std::cout << slice.sizes()[i] << " ";
+    }
+    std::cout << std::endl;
   }
 
   return array;

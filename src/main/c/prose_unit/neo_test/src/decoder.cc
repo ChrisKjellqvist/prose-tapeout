@@ -1,251 +1,186 @@
-//
-// Created by Entropy Xu on 9/10/24.
-//
-
-#include <cstring>
-#include <float_wrapper.h>
-#include <fstream>
-#include <interchange_format.h>
-#include <iostream>
-#include <torch_util.h>
-#include <util.h>
 
 #include "prose_golden.h"
-
-
-#ifdef USE_TORCH
-
 #include "torch/torch.h"
-void print_a_bit(torch::Tensor a) {
-  int l = a.sizes()[2];
-  auto *p = a.data_ptr<float>();
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      printf("%0.4f\t", p[i * l + j]);
-    }
-    printf("\n");
-  }
-}
-
-#endif
-
-void print_a_bit(float *f) {
-  int l = 768;
-  for (int i = 0; i < 2; ++i) {
-    for (int j = 0; j < 2; ++j) {
-      printf("%0.4f\t", f[i * l + j]);
-    }
-    printf("\n");
-  }
-}
-const int batch_size = 1;
-const int seq_len = 4;
-const int embed_dim = 768;
-const int num_heads = 12;
-const int layer_num = 0;
-
-
-float compare(float *a1, float *a2) {
-  float biggest_diff = 0;
-  for (int k = 0; k < seq_len; ++k) {
-    for (int i = 0; i < embed_dim; ++i) {
-      auto gold = a1[i];
-      auto asdf = a2[i];
-      auto diff = std::abs(gold - asdf);
-      if (diff > biggest_diff) {
-        biggest_diff = diff;
-        printf("%0.4f\t%0.4f\t%0.4f%%, %d %d\n", gold, asdf, 100.0*std::abs(diff/gold), k, i);
-      }
-    }
-  }
-  return biggest_diff;
-}
-
-
-int main() {
-#define g_fname(mat, layer) (get_global_checkpoint_dir() + "/transformer.h." + std::to_string(layer) +  "." #mat ".pt")
-
-#ifdef USE_TORCH
-
-  //  std::cout << (get_global_checkpoint_dir() + "/attn.k_proj.weight.pt") << std::endl;
-  std::cout << g_fname(attn.attention.k_proj.weight, layer_num) << std::endl;
-  auto k_proj_w = load_tensor(g_fname(attn.attention.k_proj.weight, layer_num));
-  auto v_proj_w = load_tensor(g_fname(attn.attention.v_proj.weight, layer_num));
-  auto q_proj_w = load_tensor(g_fname(attn.attention.q_proj.weight, layer_num));
-  auto o_proj_w = load_tensor(g_fname(attn.attention.out_proj.weight, layer_num));
-  auto o_proj_b = load_tensor(g_fname(attn.attention.out_proj.bias, layer_num));
-  auto causal_mask = load_tensor(g_fname(attn.attention.causal_mask, layer_num));
-  auto golden_input = load_tensor(get_global_checkpoint_dir() + "/input.pt");
-  auto golden_output = load_tensor(g_fname(output, layer_num));
-  auto ln1_w = load_tensor(g_fname(ln_1.weight, layer_num));
-  auto ln1_b = load_tensor(g_fname(ln_1.bias, layer_num));
-  auto ln2_w = load_tensor(g_fname(ln_2.weight, layer_num));
-  auto ln2_b = load_tensor(g_fname(ln_2.bias, layer_num));
-  auto fc_w = load_tensor(g_fname(mlp.c_fc.weight, layer_num)).t().contiguous();
-  auto fc_b = load_tensor(g_fname(mlp.c_fc.bias, layer_num));
-  auto c_proj_w = load_tensor(g_fname(mlp.c_proj.weight, layer_num)).t().contiguous();
-  std::cout << "FW: " << c_proj_w.sizes() << std::endl;
-  auto c_proj_b = load_tensor(g_fname(mlp.c_proj.bias, layer_num));
-
-  assert(golden_input.size(0) == batch_size);
-  assert(seq_len == golden_input.size(1));
-  assert(embed_dim == golden_input.size(2));
-  auto attn_output = torch::zeros({batch_size, seq_len, embed_dim}, torch::kFloat32);
-
-
-#define tfl(x) x.data_ptr<float>()
-  prose_isa_golden::decoder_layer(tfl(golden_input),
-                                  tfl(ln1_w),
-                                  tfl(ln1_b),
-                                  tfl(ln2_w),
-                                  tfl(ln2_b),
-                                  tfl(q_proj_w),
-                                  tfl(k_proj_w),
-                                  tfl(v_proj_w),
-                                  tfl(o_proj_w),
-                                  tfl(o_proj_b),
-                                  tfl(causal_mask),
-                                  tfl(fc_w),
-                                  tfl(fc_b),
-                                  tfl(c_proj_w),
-                                  tfl(c_proj_b),
-                                  batch_size,
-                                  seq_len,
-                                  embed_dim,
-                                  12,
-                                  attn_output.data_ptr<float>()
-  );
-
-  print_a_bit(attn_output);
-
-  std::cout << "golden" << std::endl;
-  auto a1 = golden_output.contiguous();
-  auto a2 = attn_output.contiguous();
-  auto biggest_diff = compare(a1.data_ptr<float>(), a2.data_ptr<float>());
-  std::cout << "biggest diff: " << biggest_diff << std::endl;
-  auto diff = attn_output - golden_output;
-
-  // since the test passed, write the arrays to the interchange text format so
-  // we can run off-chip without needing pytorch
-  std::vector<int64_t> size;
-
-#define WRITE_TO_F(tensor, fname)                                              \
-interchange_format(tensor).write_floats_to_file(fname)
-
-  WRITE_TO_F(golden_input, get_text_checkpoint_dir() + "/input.float");
-
-  // pre-split the heads for multi-head self attention
-  auto qsplit = multi_head_torch_tensor_to_flt_array(q_proj_w.t(), num_heads, 1);
-  auto ksplit = multi_head_torch_tensor_to_flt_array(k_proj_w.t(), num_heads, 1);
-  auto vsplit = multi_head_torch_tensor_to_flt_array(v_proj_w.t(), num_heads, 1);
-  auto osplit = multi_head_torch_tensor_to_flt_array(o_proj_w.t(), num_heads, 0);
-  for (int h = 0; h < num_heads; ++h) {
-    auto q2 = qsplit[h];
-    auto k2 = ksplit[h];
-    auto v2 = vsplit[h];
-    auto o2 = osplit[h];
-    // this turns the qkv matrices to 64x768
-    // and the o matrix to 768x64
-#define t_fname_no_head(mat, layer) (get_text_checkpoint_dir() + "/transformer.h." + std::to_string(layer) +  "." #mat ".float")
-#define t_fname(mat, layer, head) (get_text_checkpoint_dir() + "/transformer.h." + std::to_string(layer) +  "." + std::to_string(head) + "." + #mat ".float")
-
-    WRITE_TO_F(q2, t_fname(attn.attention.q_proj.weight, layer_num, h));
-    WRITE_TO_F(k2, t_fname(attn.attention.k_proj.weight, layer_num, h));
-    WRITE_TO_F(v2, t_fname(attn.attention.v_proj.weight, layer_num, h));
-    WRITE_TO_F(o2, t_fname(attn.attention.out_proj.weight, layer_num, h));
-  }
-  WRITE_TO_F(o_proj_b, t_fname_no_head(attn.attention.out_proj.bias, layer_num));
-  WRITE_TO_F(causal_mask, t_fname_no_head(attn.attention.causal_mask, layer_num));
-  WRITE_TO_F(attn_output, t_fname_no_head(output, layer_num));
-  WRITE_TO_F(ln1_w, t_fname_no_head(ln_1.weight, layer_num));
-  WRITE_TO_F(ln1_b, t_fname_no_head(ln_1.bias, layer_num));
-  WRITE_TO_F(ln2_w, t_fname_no_head(ln_2.weight, layer_num));
-  WRITE_TO_F(ln2_b, t_fname_no_head(ln_2.bias, layer_num));
-  WRITE_TO_F(fc_w, t_fname_no_head(mlp.c_fc.weight, layer_num));
-  WRITE_TO_F(fc_b, t_fname_no_head(mlp.c_fc.bias, layer_num));
-  WRITE_TO_F(c_proj_w, t_fname_no_head(mlp.c_proj.weight, layer_num));
-  WRITE_TO_F(c_proj_b, t_fname_no_head(mlp.c_proj.bias, layer_num));
-
-#endif
+#include "util.h"
+#include <iostream>
 
 #ifdef TEST_PROSE
-  std::cout << "starting hw" << std::endl;
-  float **qarray, **karray, **varray, **oarray;
+#include <float_wrapper.h>
+#include <beethoven/fpga_handle.h>
+#endif
 
-  qarray = new float*[num_heads];
-  karray = new float*[num_heads];
-  varray = new float*[num_heads];
-  oarray = new float*[num_heads];
-#define get_text_head(name, layer, head, dims) interchange_format::from_float_file(\
-get_text_checkpoint_dir() + "/transformer.h." + std::to_string(layer) + "." + std::to_string(head) + ("." #name ".float"), dims)
-  std::vector<int64_t> head_dims = {embed_dim / num_heads, embed_dim};
-  for (int h = 0; h < num_heads; ++h) {
+#include <torch_util.h>
 
-    auto if_qproj = get_text_head(attn.attention.q_proj.weight, layer_num, h, head_dims);
-    auto if_kproj = get_text_head(attn.attention.k_proj.weight, layer_num, h, head_dims);
-    auto if_vproj = get_text_head(attn.attention.v_proj.weight, layer_num, h, head_dims);
-    auto if_oproj = get_text_head(attn.attention.out_proj.weight, layer_num, h, head_dims);
-    qarray[h] = if_qproj.data;
-    karray[h] = if_kproj.data;
-    varray[h] = if_vproj.data;
-    oarray[h] = if_oproj.data;
+int main() {
+  // chris work computer
+  std::string model_path = "/Users/chriskjellqvist/Code/prose/prose_rtl/c_exec/src/prose_unit/neo_test/gen_ckpts/model_ckpts";
+  // std::string model_path = "/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/model_ckpts/";
+//  std::string model_path = "/Users/entropy/Development/prose_rtl/c_exec/src/prose_unit/model_ckpts/";
+
+  auto decoder_attn_k_proj = load_tensor(model_path + "/decoder_attn.attention.k_proj.weight.pt");
+  auto decoder_attn_q_proj = load_tensor(model_path + "/decoder_attn.attention.q_proj.weight.pt");
+  auto decoder_attn_v_proj = load_tensor(model_path + "/decoder_attn.attention.v_proj.weight.pt");
+  auto decoder_attn_out_proj_weight = load_tensor(model_path + "/decoder_attn.attention.out_proj.weight.pt");
+  auto decoder_attn_out_proj_bias = load_tensor(model_path + "/decoder_attn.attention.out_proj.bias.pt");
+  auto decoder_ln_1_weight = load_tensor(model_path + "/decoder_ln_1.weight.pt");
+  auto decoder_ln_1_bias = load_tensor(model_path + "/decoder_ln_1.bias.pt");
+  auto decoder_ln_2_weight = load_tensor(model_path + "/decoder_ln_2.weight.pt");
+  auto decoder_ln_2_bias = load_tensor(model_path + "/decoder_ln_2.bias.pt");
+  auto decoder_mlp_c_fc_weight = load_tensor(model_path + "/decoder_mlp.c_fc.weight.pt").t().contiguous();
+  auto decoder_mlp_c_fc_bias = load_tensor(model_path + "/decoder_mlp.c_fc.bias.pt");
+  auto decoder_mlp_c_proj_weight = load_tensor(model_path + "/decoder_mlp.c_proj.weight.pt").t().contiguous();
+  auto decoder_mlp_c_proj_bias = load_tensor(model_path + "/decoder_mlp.c_proj.bias.pt");
+  auto decoder_mlp_c_fc_out_golden = load_tensor(model_path + "/decoder_mlp_c_fc_out.pt");
+  auto decoder_input_block = load_tensor(model_path + "/decoder_input_block.pt");
+  auto decoder_after_attn_golden = load_tensor(model_path + "/decoder_after_attn.pt");
+  auto decoder_after_ln_1_golden = load_tensor(model_path + "/decoder_after_ln_1.pt");
+  auto decoder_after_ln_2_golden = load_tensor(model_path + "/decoder_after_ln_2.pt");
+  auto decoder_after_mlp_golden = load_tensor(model_path + "/decoder_after_mlp.pt");
+  auto decoder_output_block_golden = load_tensor(model_path + "/decoder_output_block.pt");
+  auto causal_mask = load_tensor(model_path + "/attn.causal_mask.pt");
+
+  // initialize these intermediate tensors using zeros
+  auto decoder_after_attn = torch::zeros_like(decoder_after_attn_golden);
+  auto decoder_after_ln_1 = torch::zeros_like(decoder_after_ln_1_golden);
+  auto decoder_after_ln_2 = torch::zeros_like(decoder_after_ln_2_golden);
+  auto decoder_after_mlp = torch::zeros_like(decoder_after_mlp_golden);
+  auto decoder_output_block = torch::zeros_like(decoder_output_block_golden);
+
+  // say success
+  std::cout << "Successfully loaded all tensors" << std::endl;
+
+  // the 0th dimension of the input is the batch size
+  uint16_t batch_size = decoder_input_block.size(0);
+  uint16_t input_length = decoder_input_block.size(1);
+  uint16_t embedding_size = decoder_input_block.size(2);
+  uint16_t num_heads = 12;
+
+  // layer norm of the input
+  prose_isa_golden::prose_layer_norm(decoder_input_block.data_ptr<float>(),
+                                     decoder_ln_1_weight.data_ptr<float>(),
+                                     decoder_ln_1_bias.data_ptr<float>(),
+                                     batch_size,
+                                     input_length,
+                                     embedding_size,
+                                     decoder_after_ln_1.data_ptr<float>());
+  auto diff_after_ln1 = decoder_after_ln_1 - decoder_after_ln_1_golden;
+  // assert error is less than 1e-5
+  assert(diff_after_ln1.abs().max().item<float>() < 1);
+#ifdef TEST_PROSE
+  auto prose_accumulator = torch::zeros({batch_size, input_length, embedding_size}, torch::kFloat32);
+  prose_float_wrapper::prose_layer_norm(decoder_input_block.data_ptr<float>(),
+                                        decoder_ln_1_weight.data_ptr<float>(),
+                                        decoder_ln_1_bias.data_ptr<float>(),
+                                        batch_size,
+                                        input_length,
+                                        embedding_size,
+                                        prose_accumulator.data_ptr<float>());
+  auto diff_prose_ln1 = decoder_after_ln_1 - prose_accumulator;
+  std::cout << "Max difference post layer norm: " << diff_prose_ln1.abs().max().item<float>() << std::endl;
+#endif
+  std::cout << "Max difference: " << diff_after_ln1.abs().max().item<float>() << std::endl;
+  std::cout << "Layer norm 1 passed" << std::endl;
+
+  // do the attention
+  prose_isa_golden::prose_multi_head_attention(decoder_after_ln_1.data_ptr<float>(),
+                                               decoder_attn_q_proj.data_ptr<float>(),
+                                               decoder_attn_k_proj.data_ptr<float>(),
+                                               decoder_attn_v_proj.data_ptr<float>(),
+                                               decoder_attn_out_proj_weight.data_ptr<float>(),
+                                               decoder_attn_out_proj_bias.data_ptr<float>(),
+                                               causal_mask.data_ptr<float>(),
+                                               batch_size,
+                                               input_length,
+                                               embedding_size,
+                                               num_heads,
+                                               decoder_after_attn.data_ptr<float>());
+#ifdef TEST_PROSE
+  float * sqrt_vector = new float[embedding_size];
+  for (int i = 0; i < embedding_size; i++) {
+    sqrt_vector[i] = std::sqrt(1.0 / embedding_size);
   }
 
-#define get_text(name, layer, ...) interchange_format::from_float_file(\
-get_text_checkpoint_dir() + "/transformer.h." + std::to_string(layer) + "." + #name + ".float", {__VA_ARGS__})
-
-  std::vector<int64_t> embed_dims = {embed_dim, embed_dim};
-  std::vector<int64_t> embed_vec = {embed_dim};
-  std::vector<int64_t> causal_dim = {1, seq_len, seq_len};
-  std::vector<int64_t> input_dim = {1, seq_len, embed_dim};
-  auto if_oprojb = get_text(attn.attention.out_proj.bias, layer_num, embed_vec);
-  auto if_causal = get_text(attn.attention.causal_mask, layer_num, {1, seq_len, seq_len});
-  auto if_input = interchange_format::from_float_file(
-    get_text_checkpoint_dir() + "/input.float", {batch_size, seq_len, embed_dim});
-  auto if_gout = get_text(output, layer_num, input_dim);
-  auto if_ln1_w = get_text(ln_1.weight, layer_num, embed_vec);
-  auto if_ln1_b = get_text(ln_1.bias, layer_num, embed_vec);
-  auto if_ln2_w = get_text(ln_2.weight, layer_num, embed_vec);
-  auto if_ln2_b = get_text(ln_2.bias, layer_num, embed_vec);
-
-  auto if_mlp_fc_wgt = get_text(mlp.c_fc.weight, layer_num, {embed_dim, 3072});
-  auto if_mlp_fc_bias = get_text(mlp.c_fc.bias, layer_num, {3072});
-  auto if_mlp_proj_wgt = get_text(mlp.c_proj.weight, layer_num, {3072, embed_dim});
-  auto if_mlp_proj_bias = get_text(mlp.c_proj.bias, layer_num, {embed_dim});
-
-
-  float *output = new float[batch_size * seq_len * embed_dim];
-  memset(output, 0, sizeof(float) * seq_len * embed_dim);
-
-  prose_float_wrapper::decoder_layer(if_input.data,
-    if_ln1_w.data,
-    if_ln1_b.data,
-    if_ln2_w.data,
-    if_ln2_b.data,
-    qarray,
-    karray,
-    varray,
-    oarray,
-    if_oprojb.data,
-    if_causal.data,
-    if_mlp_fc_wgt.data,
-    if_mlp_fc_bias.data,
-    if_mlp_proj_wgt.data,
-    if_mlp_proj_bias.data,
-    batch_size,
-    seq_len,
-    embed_dim,
-    num_heads,
-    output);
-
-  auto gold = if_gout.data;
-  auto big_diff = compare(gold, output);
-  std::cout << "biggest diff: " << big_diff << std::endl;
-
-
+  auto prose_attn_out = torch::zeros({batch_size, input_length, embedding_size}, torch::kFloat32);
+  prose_float_wrapper::prose_multi_head_attention(
+          decoder_after_ln_1.data_ptr<float>(),
+          decoder_attn_q_proj.data_ptr<float>(),
+          decoder_attn_k_proj.data_ptr<float>(),
+          decoder_attn_v_proj.data_ptr<float>(),
+          decoder_attn_out_proj_weight.data_ptr<float>(),
+          decoder_attn_out_proj_bias.data_ptr<float>(),
+          causal_mask.data_ptr<float>(),
+          batch_size,
+          input_length,
+          embedding_size,
+          num_heads,
+          prose_attn_out.data_ptr<float>());
+  auto diff_prose_attn = decoder_after_attn - prose_attn_out;
+  std::cout << "Max difference post attn: " << diff_prose_attn.abs().max().item<float>() << std::endl;
 #endif
-#ifdef USE_TORCH
-  handle.shutdown();
-#endif
+  auto diff_after_attn = decoder_after_attn - decoder_after_attn_golden;
+  // assert error is less than 1e-5
+  std::cout << "Max difference: " << diff_after_attn.abs().max().item<float>() << std::endl;
+  std::cout << "Attention passed" << std::endl;
+
+  // residual connection and layer norm
+  auto after_residual_connection = decoder_after_attn + decoder_after_ln_1;
+  prose_isa_golden::prose_layer_norm(after_residual_connection.data_ptr<float>(),
+                                     decoder_ln_2_weight.data_ptr<float>(),
+                                     decoder_ln_2_bias.data_ptr<float>(),
+                                     batch_size,
+                                     input_length,
+                                     embedding_size,
+                                     decoder_after_ln_2.data_ptr<float>());
+  auto diff_after_ln2 = decoder_after_ln_2 - decoder_after_ln_2_golden;
+  assert(diff_after_ln2.abs().max().item<float>() < 1e-1);
+  std::cout << "Max difference: " << diff_after_ln2.abs().max().item<float>() << std::endl;
+  std::cout << "Layer norm 2 passed" << std::endl << std::endl;
+  // test reset decoder_after_ln_2 to golden
+
+  // do the mlp layer
+  auto c_fc_out = torch::zeros({batch_size, input_length, /* was embedding_size=768 */ 3072}, torch::kFloat32);
+  // print all the shapes of input to prose_g_matmul
+  std::cout << "decoder_after_ln_2 shape: " << decoder_after_ln_2.sizes() << std::endl;
+  std::cout << "decoder_mlp_c_fc_weight shape: " << decoder_mlp_c_fc_weight.sizes() << std::endl;
+  std::cout << "decoder_mlp_c_fc_bias shape: " << decoder_mlp_c_fc_bias.sizes() << std::endl;
+  std::cout << "c_fc_out shape: " << c_fc_out.sizes() << std::endl;
+  prose_isa_golden::prose_g_matmul(decoder_after_ln_2.data_ptr<float>(),
+                                   decoder_mlp_c_fc_weight.data_ptr<float>(),
+                                   nullptr,
+                                   decoder_mlp_c_fc_bias.data_ptr<float>(),
+                                   c_fc_out.data_ptr<float>(),
+                                   1, 1024, 768, 3072);
+  std::cout << "g_matmul is finished" << std::endl;
+  // compare with golden
+  auto diff_after_fc = c_fc_out - decoder_mlp_c_fc_out_golden;
+  std::cout << "Max difference: " << diff_after_fc.abs().max().item<float>() << std::endl << std::endl;
+  //assert error is less than 1e-1
+  assert(diff_after_fc.abs().max().item<float>() < 1e-1);
+
+  prose_isa_golden::prose_m_matmul(c_fc_out.data_ptr<float>(),
+                                   decoder_mlp_c_proj_weight.data_ptr<float>(),
+                                   decoder_after_mlp.data_ptr<float>(),
+                                   decoder_mlp_c_proj_bias.data_ptr<float>(),
+                                   1, 1024, 3072, 768, false, nullptr);
+
+  auto diff_after_mlp = decoder_after_mlp - decoder_after_mlp_golden;
+  // assert error is less than 1e-5
+  // assert(diff_after_mlp.abs().max().item<float>() < 1e-5);
+  // print diff_after_mlp
+  std::cout << "1 diff_after_mlp shape: " << diff_after_mlp.sizes() << std::endl;
+  std::cout << "1 Max difference: " << diff_after_mlp.abs().max().item<float>() << std::endl;
+  // print average difference
+  std::cout << "1 Average difference: " << diff_after_mlp.abs().mean().item<float>() << std::endl;
+  std::cout << "1 MLP passed" << std::endl;
+
+  // add residual connection
+  auto after_residual_connection_2 = decoder_after_mlp + decoder_after_ln_2;
+  auto diff_final = after_residual_connection_2 - decoder_output_block_golden;
+  // assert error is less than 1e-5
+  std::cout << "2 Max difference: " << (diff_final / decoder_output_block_golden).abs().max().item<float>() << std::endl;
+  // assert(diff_final.abs().max().item<float>() < 1e-5);
+
+  std::cout << "Tests all passed" << std::endl;
+
   return 0;
 }

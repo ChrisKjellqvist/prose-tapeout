@@ -356,5 +356,7 @@ lfsrs/
 *.sed
 .metals/
 *.npy
-*.txt
 *__pycache__*
+*json
+layer_dict.txt
+.bloop

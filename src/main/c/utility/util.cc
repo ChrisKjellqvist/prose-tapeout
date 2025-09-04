@@ -11,8 +11,6 @@
 #include <fstream>
 #include "util.h"
 
-#include "torch/torch.h"
-
 void print_matrix(float *f, int r, int c) {
   const int print_column_width = 12;
   for (int i = 0; i < r; ++i) {
@@ -159,6 +157,7 @@ void write_to_file(const char *filename,
                    std::optional<std::pair<std::string, std::vector<std::string>>> index_writeout) {
   FILE *f = fopen(filename, "wb");
   std::vector<uintptr_t> index;
+  std::vector<size_t> sizes;
   if (!f) {
     printf("Failed to open file %s\n", filename);
     return;
@@ -187,6 +186,7 @@ void write_to_file(const char *filename,
     }
     fprintf(f, "\n");
     addr += d.second * 2;
+    sizes.push_back(d.second * 2);
     if (addr % 4096 != 0) {
       addr += 4096 - (addr % 4096);
     }
@@ -198,7 +198,7 @@ void write_to_file(const char *filename,
     FILE *rp = fopen("prose_rptr.h", "w");
     fprintf(rp, "#ifndef PROSE_RPTR_H\n#define PROSE_RPTR_H\n");
     fprintf(rp, "#include <cstdint>\n");
-    fprintf(rp, "#include <beethoven/alloc.h>\n");
+    fprintf(rp, "#include <beethoven/allocator/alloc_baremetal.h>\n");
     if (!f) {
       printf("Failed to open file %s\n", index_writeout.value().first.c_str());
       return;
@@ -208,8 +208,21 @@ void write_to_file(const char *filename,
       // replace all "." in name with "_"
       std::string name = index_writeout.value().second[i];
       std::replace(name.begin(), name.end(), '.', '_');
-      fprintf(rp, "const beethoven::remote_ptr %s(0x%lxL);\n", name.c_str(), index[i]);
+      fprintf(rp, "const beethoven::remote_ptr %s(0x%lxL);", name.c_str(), index[i]);
+      auto size = sizes[i];
+      if (size >= 1024 * 1024) {
+         fprintf(rp, "// %0.2f MB, ", double(size) / 1024 / 1024);
+      } else if (size >= 1024) {
+         fprintf(rp, "// %0.2f KB, ", double(size) / 1024);
+      } else {
+         fprintf(rp, "// %0.2f B, ", double(size));
+      }
+      if (i < index.size()-1)
+        fprintf(rp, "Total: %02.f MB\n", double(index[i]) / 1024 / 1024);
+      else
+        fprintf(rp, "Total: %0.2f MB\n", double(addr) / 1024 / 1024);
     }
+    fprintf(rp, "const uint32_t allocator_base = 0x%x;\n", addr);
     fprintf(rp, "#endif\n");
     fprintf(f, "END: %lx\n", addr);
     fclose(f);
@@ -313,6 +326,7 @@ void print_max_err() {
   fflush(stdout);
 }
 
+#ifdef USE_TORCH
 torch::Tensor load_tensor(const std::string &filename) {
   std::ifstream file(filename, std::ios::binary);
   std::vector<char> data((std::istreambuf_iterator<char>(file)),
@@ -421,3 +435,5 @@ float max_pct_diff(const torch::Tensor &a, const torch::Tensor &b) {
   auto max_b = b.abs().max().item<float>();
   return max_diff / std::max(max_a, max_b) * 100;
 }
+
+#endif

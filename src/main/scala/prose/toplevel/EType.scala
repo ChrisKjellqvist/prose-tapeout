@@ -5,8 +5,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
 import prose.activations.{ProseSIMD, Reciprocal}
-import beethoven.common.Misc.{left_assign, multByIntPow2}
-import prose.SpecialFunction
+import beethoven.common.Misc.left_assign
+import prose.nn_util.SpecialFunction
 
 class EType(stype_latency: Int)(
   kMax: Int,
@@ -14,13 +14,11 @@ class EType(stype_latency: Int)(
   N: Int,
   SRAMLatency: Int,
   fpuLatency: Int,
-  simdLatency: Int,
   maxBatch: Int,
   maxNTileCols: Int,
-  supportWideBias: Boolean,
-  n_arrays: Int
+  supportWideBias: Boolean
 )(implicit p: Parameters) extends BaseCore(kMax, Nmin, N,
-  SRAMLatency, fpuLatency, simdLatency, maxBatch, supportWideBias, maxNTileCols, n_arrays, Some((SpecialFunction.EXP, stype_latency))) {
+  SRAMLatency, fpuLatency, maxBatch, supportWideBias, maxNTileCols, Some((SpecialFunction.EXP, stype_latency))) {
 
   SpecialFunction.generate(SpecialFunction.EXP)
 
@@ -43,13 +41,12 @@ class EType(stype_latency: Int)(
    */
 
   val accumulatorMax = Math.max(maxBatch + 1, 2 * fpuLatency)
-  val accumulators: Vec[Vec[UInt]] = Reg(Vec(accumulatorMax, Vec(N * n_arrays, UInt(32.W))))
+  val accumulators: Vec[Vec[UInt]] = Reg(Vec(accumulatorMax, Vec(N, UInt(32.W))))
   val fpuLatencyCntrIn, fpuLatencyCntrOut, accumulatorBatchCounter, accumulatorBatchCounterOut = Reg(UInt(log2Up(accumulatorMax).W))
-  //(multByIntPow2(1.U +& active_cores_MO, N) - 1.U)
-  val smaxReducCounterWidth = log2Up(Seq(fpuLatency + maxBatch + 1, N, 3 * maxBatch - 3, n_arrays * N).max)
+  val smaxReducCounterWidth = log2Up(Seq(fpuLatency + maxBatch + 1, N, 3 * maxBatch - 3).max)
   val softmaxReduceCounter = Reg(UInt(smaxReducCounterWidth.W))
 
-  when(state === s_start_row) {
+  when(matrixOpCmd.req.fire) {
     accumulators.flatten.foreach(_ := 0.U)
     accumulatorBatchCounter := 0.U
     accumulatorBatchCounterOut := 0.U
@@ -58,7 +55,7 @@ class EType(stype_latency: Int)(
 
   }
   // take 1 off the latency since we're not doing a multiply?
-  val accumulatorEngine = Module(new ProseSIMD(N * n_arrays, fpuLatency, false, 32, None))
+  val accumulatorEngine = Module(new ProseSIMD(N, fpuLatency, false, 32, None))
   val SIMD_outFire = simd_engine.io.readyOut && simd_engine.io.validOut
   accumulatorEngine.io.validIn := SIMD_outFire
   accumulatorEngine.io.accumulator zip accumulators(fpuLatencyCntrIn) foreach left_assign
@@ -95,13 +92,9 @@ class EType(stype_latency: Int)(
   }
 
   val (List(sm_req), List(sm_dat)) = getWriterWrapper("softmax_writeout")
-  sm_req.valid := state === s_start_row
-  val sm_req_len = Misc.multByIntPow2(CTRL_cmdCopy.batchSize * (1.U +& active_cores_MO), N * 2)
-  sm_req.bits.len := sm_req_len
-  sm_req.bits.addr := CTRL_cmdCopy.softmax_out.get
-  when (state === s_start_row) {
-    CTRL_cmdCopy.softmax_out.get := CTRL_cmdCopy.softmax_out.get + sm_req_len
-  }
+  sm_req.valid := matrixOpCmd.req.fire
+  sm_req.bits.len := Misc.multByIntPow2(matrixOpCmd.req.bits.batchSize, N*2)
+  sm_req.bits.addr := matrixOpCmd.req.bits.softmax_out.get
   sm_dat.data.valid := false.B
   val write_out = Reg(Bool())
 
@@ -110,11 +103,12 @@ class EType(stype_latency: Int)(
   reciprocal.io.in.valid := false.B
   reciprocal.io.in.bits := DontCare
 
-  val sm_norm_fifo = Module(new Queue(UInt(16.W), N * maxBatch * n_arrays, false, false, false, false))
+  val sm_norm_fifo = Module(new Queue(UInt(16.W), N * maxBatch, false, false, false, false))
   sm_norm_fifo.io.enq.valid := reciprocal.io.out.valid
   sm_norm_fifo.io.enq.bits := reciprocal.io.out.bits
   sm_norm_fifo.io.deq.ready := false.B
   sm_dat.data.bits := sm_norm_fifo.io.deq.bits
+
 
   // prevent the greater core from returning until we're done with softmax
   can_move_to_finish := false.B
@@ -159,7 +153,7 @@ class EType(stype_latency: Int)(
       when((accumulatorBatchCounter + 1.U) === activationBatch) {
         accumulatorBatchCounter := 0.U
         softmaxReduceCounter := softmaxReduceCounter + 1.U
-        when(softmaxReduceCounter === (multByIntPow2(1.U +& active_cores_MO, N) - 1.U)) {
+        when(softmaxReduceCounter === (N - 1).U) {
           softmaxReduceCounter := 0.U
           softmax_state := sm_stall
         }
@@ -174,10 +168,9 @@ class EType(stype_latency: Int)(
     sm_norm_fifo.io.deq.ready := sm_dat.data.ready
     when(sm_dat.isFlushed && sm_req.ready) {
       can_move_to_finish := true.B
-      // this shouldn't be necessary because moving into this state already implies state===s_aux
-//      when(matrixOpCmd.resp.fire) {
+      when(matrixOpCmd.resp.fire) {
         softmax_state := sm_idle
-//      }
+      }
     }
   }
 }

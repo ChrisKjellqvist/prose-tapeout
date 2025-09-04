@@ -1,13 +1,10 @@
 package prose.systolic_array
 
-import beethoven.Platforms.{BuildModeKey, PlatformType}
-import beethoven.{BuildMode, platform}
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import fpwrapper._
 import fpwrapper.impl.fpnew._
-import fpwrapper.impl.xilinx.{XilinxFPUImplementation, XilinxOperator}
 import prose.FPUBuildMode
 
 object PEMode extends chisel3.ChiselEnum {
@@ -15,7 +12,7 @@ object PEMode extends chisel3.ChiselEnum {
 }
 
 class OutputStationaryPE(fpuLatency: Int, maxBatch: Int, withUpShift: Boolean)(implicit p: Parameters) extends Module {
-  override val desiredName = s"OutputStationaryPE_b${maxBatch}_l${fpuLatency}_up$withUpShift"
+  override val desiredName = s"OutputStationaryPE_${maxBatch}x${fpuLatency}"
   val io = IO(new Bundle {
     val syncResetIn = Input(Bool())
     val shiftOutLeft = Input(Bool())
@@ -59,11 +56,8 @@ class OutputStationaryPE(fpuLatency: Int, maxBatch: Int, withUpShift: Boolean)(i
 
   val fma = Module(
     new FPU(
-      if (platform.platformType == PlatformType.FPGA && p(BuildModeKey)==BuildMode.Synthesis) {
-        XilinxFPUImplementation(XilinxOperator.FMA, fpuLatency)
-      } else {
-        FPUNewImplementation(ADDMUL = Some(fpuLatency))
-      },
+//      XilinxFPUImplementation(XilinxOperator.FMA, fpuLatency),
+      FPUNewImplementation(ADDMUL = Some(fpuLatency)),
       FPFloatFormat.Fp32,
       lanes = 1,
       sourceTy = p(FPUBuildMode)))
@@ -112,12 +106,7 @@ class OutputStationaryPE(fpuLatency: Int, maxBatch: Int, withUpShift: Boolean)(i
   when(io.shiftOutLeft || io.shiftOutAlt.getOrElse(false.B)) {
     val currentRead = accumulatorVec(batchCountRead)
     val roundBF16 = currentRead(31, 16) + currentRead(15)
-    val cut = currentRead(31, 16)
-    val isVerySmall = cut(14, 0) === 0.U
-    val isNonZero = currentRead(15, 0) =/= 0.U
-    val sign = currentRead(31)
-
-    io.shift_out := Mux(isVerySmall && isNonZero, Cat(sign, 1.U(15.W)), roundBF16) // this is RNE rounding, maybe dont use?
+    io.shift_out := roundBF16 // this is RNE rounding, maybe dont use?
     when (io.shiftOutLeft) {
       accumulatorVec(batchCountRead) := Cat(io.shift_in, 0.U(16.W))
     }

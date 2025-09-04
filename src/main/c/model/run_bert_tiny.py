@@ -6,40 +6,38 @@ import os
 # save the weight matrix and bias vector of the first layer of the self attention into a raw array
 import numpy as np
 
-# assume 2-bytes per element
-total_tensor_size_bytes:float = 0
-
-def save_tensor(tensor, filename):
-    np.save(filename, tensor.detach().numpy())
-    global total_tensor_size_bytes
-    sz = tensor.numel() * 2
-    total_tensor_size_bytes += sz
-    print(filename, " is ", sz, "B")
-
 if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained("Intel/dynamic_tinybert")
     model = AutoModelForQuestionAnswering.from_pretrained("Intel/dynamic_tinybert")
 
-    def ask_question(question, context):
-        inputs = tokenizer(question, context, return_tensors="pt")
-        start_positions = torch.tensor([1])
-        end_positions = torch.tensor([3])
+# assume 2-bytes per element
+total_tensor_size_bytes = 0
 
-        # print out the shape of the question and context matrix
-        print(inputs["input_ids"].shape)
-        print(inputs["attention_mask"].shape)
+def save_tensor(tensor, filename):
+    np.save(filename, tensor.detach().numpy())
+    global total_tensor_size_bytes
+    total_tensor_size_bytes += tensor.numel() * 2
 
+def ask_question(question, context):
+    inputs = tokenizer(question, context, return_tensors="pt")
+    start_positions = torch.tensor([1])
+    end_positions = torch.tensor([3])
 
-        outputs = model(**inputs, start_positions=start_positions, end_positions=end_positions)
-        start_scores = outputs.start_logits
-        end_scores = outputs.end_logits
-
-        answer_start = torch.argmax(start_scores)
-        answer_end = torch.argmax(end_scores) + 1
-
-        return tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens(inputs["input_ids"][0][answer_start:answer_end]))
+    # print out the shape of the question and context matrix
+    print(inputs["input_ids"].shape)
+    print(inputs["attention_mask"].shape)
 
 
+    outputs = model(**inputs, start_positions=start_positions, end_positions=end_positions)
+    start_scores = outputs.start_logits
+    end_scores = outputs.end_logits
+
+    answer_start = torch.argmax(start_scores)
+    answer_end = torch.argmax(end_scores) + 1
+
+    return tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens(inputs["input_ids"][0][answer_start:answer_end]))
+
+if __name__ == "__main__":
     context = ("My name is Chris. I have three cats named Simon, Garfunkel, and Goobie. I went to undergrad at the University"
                "of Rochester for computer science. I am currently a PhD student at Duke University and doing research on"
                "hardware accelerators and associated frameworks. I am TAing an undergrad class right now and it is the"

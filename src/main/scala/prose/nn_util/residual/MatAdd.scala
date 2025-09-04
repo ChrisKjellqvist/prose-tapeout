@@ -1,7 +1,7 @@
 package prose.nn_util.residual
 
 import beethoven._
-import beethoven.common.{AccelCommand, Address, EmptyAccelResponse, splitIntoChunks}
+import beethoven.common._
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._

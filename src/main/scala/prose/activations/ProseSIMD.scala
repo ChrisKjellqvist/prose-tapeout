@@ -9,9 +9,9 @@ import beethoven.Platforms._
 import beethoven.common._
 import fpwrapper._
 import fpwrapper.impl.fpnew._
-import fpwrapper.impl.xilinx.{XilinxFPUImplementation, XilinxOperator}
-import prose.{FPUBuildMode, SpecialFunction}
-import prose.SpecialFunction.SpecialFunction
+import prose.FPUBuildMode
+import prose.nn_util.SpecialFunction
+import prose.nn_util.SpecialFunction.SpecialFunction
 import prose.random.ShiftRegEnableReset
 
 class ProseSIMD(vectorDepth: Int,
@@ -25,11 +25,11 @@ class ProseSIMD(vectorDepth: Int,
    * broadcast to the entire SIMD, that operand(0) is the same all the way down the column.
    */
 
-  override val desiredName = s"ProSESIMD_v${vectorDepth}_fpu${fpuLatency}${
+  override val desiredName = s"ProSESIMD_v${vectorDepth}_fpu${fpuLatency}_${
     specialFn match {
-      case None => ""
-      case Some((SpecialFunction.EXP, l)) => "_e" + l.toString
-      case Some((SpecialFunction.GELU, l)) => "_g" + l.toString
+      case None => "_"
+      case Some((SpecialFunction.EXP, l)) => "e" + l.toString
+      case Some((SpecialFunction.GELU, l)) => "g" + l.toString
     }
   }"
 
@@ -62,12 +62,7 @@ class ProseSIMD(vectorDepth: Int,
     override val desiredName = f"comboSIMDFPU_${vectorDepth}_${fpuLatency}_${withScalarMult}_${accumulatorWidth}_${specialFn.map(_._1.toString).getOrElse("_")}"
 
     val fpu = Module(new FPU(
-      implementation =
-        if (platform.platformType == PlatformType.FPGA && p(BuildModeKey)==BuildMode.Synthesis) {
-          XilinxFPUImplementation(XilinxOperator.FMA, fpuLatency)
-        } else {
-          FPUNewImplementation(ADDMUL = Some(fpuLatency))
-        },
+      implementation = FPUNewImplementation(ADDMUL = Some(fpuLatency)),
       floattype = FPFloatFormat.Fp32,
       lanes = 1,
       sourceTy = p(FPUBuildMode)))
@@ -90,14 +85,14 @@ class ProseSIMD(vectorDepth: Int,
         if (accumulatorWidth == 32)
           io.outS := fpu.io.resp.bits.result(0)
         else
-          io.outS := fpu.io.resp.bits.result(0)(31, 16)
+          io.outS :=fpu.io.resp.bits.result(0)(31, 16)
       case Some((SpecialFunction.EXP, latency: Int)) =>
         val expModule = Module(new LookupTableWithLatencyWithEnable("Exp", latency))
         expModule.io.in := fpu.io.resp.bits.result(0)(31, 16)
         expModule.enable := io.readyOut
         io.validOut := ShiftRegEnableReset(io.readyOut || reset.asBool, false.B, fpu.io.resp.valid, latency, 0, clock)
-        //          io.readyOut ||
-        //            ShiftReg(reset.asBool, latency))
+//          io.readyOut ||
+//            ShiftReg(reset.asBool, latency))
         if (accumulatorWidth == 32)
           io.outS := Cat(expModule.io.out, 0.U(16.W))
         else {
@@ -106,42 +101,16 @@ class ProseSIMD(vectorDepth: Int,
       case Some((SpecialFunction.GELU, latency: Int)) =>
         val geluModule = Module(new LookupTableWithLatencyWithEnable("GeLU", latency))
         geluModule.io.in := fpu.io.resp.bits.result(0)(31, 16)
-        val fpu_gelu = Module(new FPU(
-          implementation =
-            if (platform.platformType == PlatformType.FPGA && p(BuildModeKey)==BuildMode.Synthesis) {
-              XilinxFPUImplementation(XilinxOperator.FMA, latency)
-            } else {
-              FPUNewImplementation(ADDMUL = Some(latency))
-            },
-          floattype = FPFloatFormat.Fp16Alt,
-          lanes = 1,
-          sourceTy = p(FPUBuildMode)))
-          val geluModuleValidOut = ShiftRegEnable(fpu.io.resp.valid, latency, io.readyOut, clock)
-          fpu_gelu.io.req.valid := geluModuleValidOut && io.readyOut
-          geluModule.enable := io.readyOut
-          val relu = Mux(fpu.io.resp.bits.result(0)(31), 0.U(16.W), fpu.io.resp.bits.result(0)(31, 16))
-          fpu_gelu.io.req.bits.operands(0)(0) := 0.U
-          fpu_gelu.io.req.bits.operands(1)(0) := ShiftReg(relu, latency, clock)
-          fpu_gelu.io.req.bits.operands(2)(0) := geluModule.io.out
-          fpu_gelu.io.req.bits.op := FPOperation.ADD
-          fpu_gelu.io.req.bits.dstFormat := FPFloatFormat.Fp16Alt
-          fpu_gelu.io.req.bits.srcFormat := FPFloatFormat.Fp16Alt
-          fpu_gelu.io.req.bits.intFormat := DontCare
-          fpu_gelu.io.req.bits.opModifier := 0.U
-          fpu_gelu.io.req.bits.roundingMode := FPRoundingMode.RNE
-          fpu_gelu.io.req.valid := ShiftRegEnableReset(io.readyOut || reset.asBool, false.B, fpu.io.resp.valid, latency, 0, clock)
-
-          fpu_gelu.io.resp.ready := io.readyOut
-
-          io.validOut := fpu_gelu.io.resp.valid
-          if (accumulatorWidth == 32)
-            io.outS := Cat(fpu_gelu.io.resp.bits.result(0), 0.U(16.W))
-          else
-            io.outS := fpu_gelu.io.resp.bits.result(0)
+        geluModule.enable := io.readyOut
+        io.validOut := ShiftRegEnable(fpu.io.resp.valid, latency, io.readyOut || ShiftReg(reset.asBool, latency, clock), clock)
+        if (accumulatorWidth == 32)
+          io.outS := Cat(geluModule.io.out, 0.U(16.W))
+        else
+          io.outS := geluModule.io.out
     }
 
     if (p(BuildModeKey) == BuildMode.Simulation) {
-      val operandCast = WireInit(VecInit((io.operand << 16).asUInt))
+      val operandCast = WireInit(VecInit((io.operand  << 16).asUInt))
       val operandMultCast = WireInit(VecInit((io.operandMult.getOrElse(0.U) << 16).asUInt))
       val accumulatorCast = if (accumulatorWidth == 16) WireInit(VecInit((io.accumulator << 16).asUInt)) else io.accumulator
       val outputCast = WireInit(VecInit((io.outS << 16).asUInt))

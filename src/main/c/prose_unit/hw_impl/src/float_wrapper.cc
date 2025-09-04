@@ -1,5 +1,4 @@
 #include "float_wrapper.h"
-#include <bit>
 #include <cmath>
 #include <cstring>
 #include "beethoven/rocc_cmd.h"
@@ -445,7 +444,7 @@ void prose_float_wrapper::prose_self_attention(
     prose_e_matmul(temps[0], temps[1], attention_score_matrix_temp,
                    attention_mask, sqrt_vector,
                    true, // weights ARE BATCHED (input (key projection) x
-                   // weights (query projection))
+                         // weights (query projection))
                    batch_size, input_length, head_size, input_length, temps[3],
                    PROSE_biasMATRIX, false);
 
@@ -507,12 +506,12 @@ void prose_float_wrapper::prose_self_attention(
 
 void prose_float_wrapper::prose_layer_norm(float* input, float* gamma,
                                            float* beta, uint8_t batch_size,
-                                           uint16_t seq_len, uint16_t embed_dim,
-                                           float* out) {
-  auto gamma_beta_combined = handle.malloc(2 * 2 * embed_dim);
+                                           uint16_t seq_len,
+                                           uint16_t input_length, float* out) {
+  auto gamma_beta_combined = handle.malloc(2 * 2 * input_length);
   // combine gamma and beta from decorder_ln_1_[weight/bias] in alternating
   // fashion
-  for (int i = 0; i < embed_dim; i++) {
+  for (int i = 0; i < input_length; i++) {
     ((uint16_t*)(gamma_beta_combined.getHostAddr()))[2 * i + 1] =
         (reinterpret_cast<uint32_t&>(gamma[i])) >> 16;
     ((uint16_t*)(gamma_beta_combined.getHostAddr()))[2 * i] =
@@ -520,23 +519,20 @@ void prose_float_wrapper::prose_layer_norm(float* input, float* gamma,
   }
   handle.copy_to_fpga(gamma_beta_combined);
 
-  auto input_ptr = handle.malloc(2 * embed_dim * seq_len * batch_size);
-  auto out_ptr = handle.malloc(2 * embed_dim * seq_len * batch_size);
-  uint16_t* temp = new uint16_t[embed_dim * seq_len * batch_size];
-  memcpy_fp32_to_bf16(temp, input, embed_dim * seq_len * batch_size);
+  auto input_ptr = handle.malloc(2 * input_length * seq_len * batch_size);
+  auto out_ptr = handle.malloc(2 * input_length * seq_len * batch_size);
+  uint16_t* temp = new uint16_t[input_length * seq_len * batch_size];
+  memcpy_fp32_to_bf16(temp, input, input_length * seq_len * batch_size);
   convertRowMajorFormatToProSEColMajor(temp, (uint16_t*)input_ptr.getHostAddr(),
-                                       seq_len, embed_dim, batch_size,
+                                       seq_len, input_length, batch_size,
                                        PROSE_Nmin);
   handle.copy_to_fpga(input_ptr);
 
   prose_impl::prose_layer_norm(input_ptr, gamma_beta_combined, batch_size,
-                               embed_dim, seq_len, out_ptr);
+                               input_length, seq_len, out_ptr);
 
   handle.copy_from_fpga(out_ptr);
-  for (int i = 0; i < 32; ++i) {
-    printf("%d %x\n", i, ((uint16_t*)out_ptr.getHostAddr())[i]);
-  }
-  convertPCMtoTCM((uint16_t*)out_ptr.getHostAddr(), out, seq_len, embed_dim,
+  convertPCMtoTCM((uint16_t*)out_ptr.getHostAddr(), out, seq_len, input_length,
                   batch_size, PROSE_Nmin);
   delete[] temp;
 }
@@ -545,11 +541,10 @@ void prose_float_wrapper::prose_multi_head_attention(
     float* input, float** q_proj_w, float** k_proj_w, float** v_proj_w,
     float** o_proj_w, float* o_proj_b, float* causal_mask, uint8_t batch_size,
     uint16_t seq_len, uint16_t embed_dim, uint16_t num_heads,
-    float* attn_output, bool scaled_attention) {
+    float* attn_output) {
   auto head_size = embed_dim / num_heads;
   assert(embed_dim == head_size * num_heads);
-  std::cout << std::dec << embed_dim << " / " << num_heads
-            << " = head_size: " << head_size << std::endl;
+  std::cout << "head_size: " << head_size << std::endl;
   for (int i = 0; i < batch_size * seq_len * embed_dim; i++) {
     if (attn_output[i] != 0) {
       std::cerr << "attn_output is not zero-initialized" << std::endl;
@@ -559,45 +554,34 @@ void prose_float_wrapper::prose_multi_head_attention(
 
   float* sqrt_vector = new float[seq_len];
   for (int i = 0; i < seq_len; i++) {
-    if (scaled_attention)
-      sqrt_vector[i] = 1.0 / std::sqrt(seq_len);
-    else
-      sqrt_vector[i] = 1;
+    sqrt_vector[i] = 1.0 / std::sqrt(seq_len);
   }
   auto attn_accumulator = handle.malloc(2 * batch_size * seq_len * embed_dim);
   memset(attn_accumulator.getHostAddr(), 0,
          2 * batch_size * seq_len * embed_dim);
 
-  for (int h = 0; h < num_heads; ++h) {
+  for (int h = 0; h < num_heads; h++) {
     printf("starting head %d\n", h);
-    auto q_proj_w_h = q_proj_w[h];
-    auto k_proj_w_h = k_proj_w[h];
-    auto v_proj_w_h = v_proj_w[h];
-    auto o_proj_w_h = o_proj_w[h];
+    auto q_proj_w_h = q_proj_w[h]; // q_proj_w_tensor.slice(0, h * head_size, (h
+                                   // + 1) * head_size).contiguous();
+    auto k_proj_w_h = k_proj_w[h]; // k_proj_w_tensor.slice(0, h * head_size, (h
+                                   // + 1) * head_size).contiguous();
+    auto v_proj_w_h = v_proj_w[h]; // v_proj_w_tensor.slice(0, h * head_size, (h
+                                   // + 1) * head_size).contiguous();
+    auto o_proj_w_h = o_proj_w[h]; // o_proj_w_tensor.slice(1, h * head_size, (h
+                                   // + 1) * head_size).contiguous();
 
     prose_self_attention(input, batch_size, seq_len, embed_dim, head_size,
                          q_proj_w_h, k_proj_w_h, v_proj_w_h, nullptr, nullptr,
                          nullptr, causal_mask, sqrt_vector, o_proj_b,
                          o_proj_w_h, h == 0, attn_accumulator);
-    uint16_t * float_check = new uint16_t [seq_len * batch_size * embed_dim];
-    convertPCMtoTCM((uint16_t*)attn_accumulator.getHostAddr(), float_check,
-                seq_len, embed_dim, batch_size, PROSE_Nmin);
-    for (int i = 0; i < seq_len; ++i) {
-      for (int j = 0; j < embed_dim; ++j) {
-        uint32_t q = float_check[i * embed_dim + j];
-        q <<= 16;
-        float f = reinterpret_cast<float&>(q);
-        printf("%0.4f ", f);
-      }
-      printf("\n");
-    }
-    delete [] float_check;
+    break;
   }
 
   convertPCMtoTCM((uint16_t*)attn_accumulator.getHostAddr(), attn_output,
-                  seq_len, embed_dim, batch_size, PROSE_Nmin);
+    seq_len, embed_dim, batch_size, PROSE_Nmin);
   // memcpy_bf16_to_fp32(attn_output, (uint16_t*)attn_accumulator.getHostAddr(),
-  // batch_size * seq_len * embed_dim);
+                      // batch_size * seq_len * embed_dim);
 }
 
 void prose_float_wrapper::prose_matadd(float* input1, float* input2,
@@ -613,112 +597,4 @@ void prose_float_wrapper::prose_matadd(float* input1, float* input2,
 
   handle.copy_from_fpga(output_ptr);
   memcpy_bf16_to_fp32(output, (uint16_t*)output_ptr.getHostAddr(), eles);
-}
-
-const int mlp_m = 3072;
-
-void prose_float_wrapper::prose_mlp(float* input, float* fc_wgt, float* fc_bias,
-                                    float* proj_wgt, float* proj_bias,
-                                    float* out, int batch_size, int seq_len,
-                                    int embed_size) {
-  auto interm = handle.malloc(2 * batch_size * seq_len * mlp_m);
-  prose_float_wrapper::prose_g_matmul(input, fc_wgt, interm, fc_bias, nullptr,
-                                      PROSE_biasCOLS, batch_size, seq_len,
-                                      embed_size, mlp_m, false);
-  prose_float_wrapper::prose_m_matmul(interm, proj_wgt, out, proj_bias, nullptr,
-                                      batch_size, seq_len, mlp_m, embed_size,
-                                      true, false, false, PROSE_biasCOLS);
-}
-
-static void print_a_bit(float *f) {
-  int l = 768;
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      printf("%0.4f\t", f[i * l + j]);
-    }
-    printf("\n");
-  }
-}
-
-
-void prose_float_wrapper::decoder_layer(
-    float* input, float* ln1_wgt, float* ln1_bias, float* ln2_wgt,
-    float* ln2_bias, float** qarray, float** karray, float** varray,
-    float** oarray, float* obias, float* causal_mask, float* mlp_fc_wgt,
-    float* mlp_fc_bias, float* mlp_proj_wgt, float* mlp_proj_bias,
-    uint8_t batch_size, uint16_t seq_len, uint16_t embed_dim,
-    uint16_t num_heads, float* attn_output) {
-  float* interm = new float[batch_size * seq_len * embed_dim];
-  float* interm2 = new float[batch_size * seq_len * embed_dim];
-  float* residual = new float[batch_size * seq_len * embed_dim];
-
-  memset(interm2, 0, sizeof(float) * batch_size * seq_len * embed_dim);
-  prose_float_wrapper::prose_layer_norm(input, ln1_wgt, ln1_bias, batch_size,
-                                        seq_len, embed_dim, interm);
-
-  // attn
-  prose_float_wrapper::prose_multi_head_attention(
-      interm, qarray, karray, varray, oarray, obias, causal_mask, batch_size,
-      seq_len, embed_dim, num_heads, interm2, false);
-
-  std::cout << "ATTENTION OUT FINAL: " << std::endl;
-  for (int i = 0; i < seq_len; ++i) {
-    for (int j = 0; j < embed_dim; ++j) {
-      float q = interm2[i * embed_dim + j];
-      printf("%0.4f ", q);
-    }
-    printf("\n");
-  }
-
-
-  // add inputs to the attn output, call this residual
-  prose_float_wrapper::prose_matadd(interm2, input, residual,
-                                    batch_size * seq_len * embed_dim);
-  std::cout << "AFTER ADD RESIDUAL: " << std::endl;
-  for (int i = 0; i < seq_len; ++i) {
-    for (int j = 0; j < embed_dim; ++j) {
-      float q = residual[i * embed_dim + j];
-      printf("%0.4f ", q);
-    }
-    printf("\n");
-  }
-
-
-  prose_float_wrapper::prose_layer_norm(residual, ln2_wgt, ln2_bias, batch_size,
-                                        seq_len, embed_dim, interm2);
-
-  std::cout << "AFTER ADD LN2: " << std::endl;
-  for (int i = 0; i < seq_len; ++i) {
-    for (int j = 0; j < embed_dim; ++j) {
-      float q = interm2[i * embed_dim + j];
-      printf("%0.4f ", q);
-    }
-    printf("\n");
-  }
-
-  // THESE QUALIFIER ARE NOT REDUNDANT
-  prose_float_wrapper::prose_mlp(interm2, mlp_fc_wgt, mlp_fc_bias, mlp_proj_wgt,
-                                 mlp_proj_bias, interm, batch_size, seq_len,
-                                 embed_dim);
-
-  std::cout << "AFTER MLP: " << std::endl;
-  for (int i = 0; i < seq_len; ++i) {
-    for (int j = 0; j < embed_dim; ++j) {
-      float q = interm[i * embed_dim + j];
-      printf("%0.4f ", q);
-    }
-    printf("\n");
-  }
-
-
-  prose_float_wrapper::prose_matadd(residual, interm, attn_output,
-                                    embed_dim * batch_size * seq_len);
-  std::cout << "AFTER FINAL RESIDUAL ADD: " << std::endl;
-  for (int i = 0; i < seq_len; ++i) {
-    for (int j = 0; j < embed_dim; ++j) {
-      float q = attn_output[i * embed_dim + j];
-      printf("%0.4f ", q);
-    }
-    printf("\n");
-  }
 }

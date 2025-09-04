@@ -132,16 +132,14 @@ class Variance(concurrency: Int,
   }
   io.output.bits.means := means
 
-  val sqrtLUT = Module(new InvSqrt())
-  sqrtLUT.io.in.valid := false.B
-  sqrtLUT.io.out.ready := true.B
-  when (sqrtLUT.io.in.valid) {
-    assert(sqrtLUT.io.in.ready)
-  }
-  sqrtLUT.io.in.bits := (fpuDataType match {
+  val sqrtLUT = Module(new LookupTableWithLatency("InvSqrt", sqrtLUTLatency))
+  sqrtLUT.io.in := (fpuDataType match {
     case FPFloatFormat.Fp16Alt => fpuUnpackResult (mulFPU.io.resp.bits.result(0))
     case FPFloatFormat.Fp32 => mulFPU.io.resp.bits.result(0)(31, 16)
   })
+  val sqrtLUTvalid = Wire(Bool())
+  sqrtLUTvalid := false.B
+  val sqrtLUTvalidOut = ShiftReg(sqrtLUTvalid, sqrtLUTLatency, clock)
 
   when(accMode === s_acc) {
     when(mulFPU.io.resp.valid) {
@@ -162,14 +160,11 @@ class Variance(concurrency: Int,
     mulFPU.io.req.bits.operands(0)(0) := Mux(io.norm_ty === NormType.LayerNorm.U, accs(normCntr), fpuLoadData(means(normCntr)))
     mulFPU.io.req.bits.operands(1)(0) := fpuLoadData(norm) // 1/N
     mulFPU.io.req.bits.operands(2)(0) := fpuLoadData(0x3727.U) // 1e-5
-    sqrtLUT.io.in.valid := mulFPU.io.resp.valid
-    when (sqrtLUT.io.in.valid) {
-      assert(sqrtLUT.io.in.ready)
-    }
+    sqrtLUTvalid := mulFPU.io.resp.valid
 
     val normShift = ShiftReg(normCntr, fmaLatency + sqrtLUTLatency, clock)
-    when(sqrtLUT.io.out.valid) {
-      accs(normShift) := fpuLoadData(sqrtLUT.io.out.bits)
+    when(sqrtLUTvalidOut) {
+      accs(normShift) := fpuLoadData(sqrtLUT.io.out)
       normCntr := normCntr + 1.U
       inflight := false.B
       when(normCntr === (concurrency - 1).U) {

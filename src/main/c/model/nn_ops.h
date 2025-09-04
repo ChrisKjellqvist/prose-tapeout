@@ -9,8 +9,8 @@
 //
 
 #include <beethoven/fpga_handle.h>
-#include <beethoven_allocator_declaration.h>
-#include <beethoven/alloc.h>
+#include <beethoven_hardware.h>
+#include <beethoven/allocator/alloc.h>
 #include "nn_ops.h"
 
 

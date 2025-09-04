@@ -220,7 +220,7 @@ int main() {
   // End simulation
   const int arsz = K * PROSE_maxBatch * 4 * PROSE_ECore_N;
   float norms[4 * PROSE_ECore_N * PROSE_maxBatch];
-  prose_g_matmul(
+  prose_e_matmul(
           remote_ptr(0, arsz * 2),
           remote_ptr(arsz * 2, arsz * 2),
           remote_ptr(arsz * 4, arsz * 2),
@@ -238,13 +238,19 @@ int main() {
 #else
   printf("random seed: %x\n", seed);
   fflush(stdout);
-  for (int K = 16; K <= 16; K += 16) {
-    for (int j = 1; j <= 8; ++j) {
-      for (int k = 1; k <= 8; ++k) {
+  bool only_once = true;
+  for (int K = 16; K <= PROSE_kMax; K += 16) {
+    for (int j = 1; j <= 4; ++j) {
+      for (int k = 1; k <= 4; ++k) {
         for (int batch = 1; batch <= PROSE_maxBatch; ++batch) {
           printf("\rExecuting: M_mult(%d), Q_mult(%d), batch(%d)", j, k, 1);
           fflush(stdout);
-          test_prose_e(batch, K, PROSE_GCore_N * j, PROSE_GCore_N * k, gelu);
+          for (int trial = 0; trial < n_trials; ++trial) {
+            test_prose_e(batch, K, PROSE_GCore_N * j, PROSE_GCore_N * k, gelu);
+            if (only_once) {
+              goto break_out;
+            }
+          }
         }
       }
     }

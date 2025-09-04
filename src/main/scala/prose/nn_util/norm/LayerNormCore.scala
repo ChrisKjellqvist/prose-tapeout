@@ -18,7 +18,7 @@ class LayerNormCore(maxSetSize: Int,
                     sqrtLUTLatency: Int = 1,
                    )(implicit p: Parameters) extends AcceleratorCore {
   // make sure all of the necessary LUTs are generated
-  val _ = {
+  locally {
     os.makeDir.all(os.pwd / "luts")
     try {
       os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
@@ -26,10 +26,10 @@ class LayerNormCore(maxSetSize: Int,
       case _: os.SubprocessException => // try to delete the lut directory and try again
         os.remove.all(os.pwd / "luts")
         os.makeDir.all(os.pwd / "luts")
-        os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
+        os.proc("cmake", os.pwd /  "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
     }
     os.proc("make", "generate_invsqrt").call(cwd = os.pwd / "luts")
-    os.proc("./generate_invsqrt", os.pwd / "luts").call(cwd = os.pwd / "luts")
+    os.proc("./generate_invsqrt").call(cwd = os.pwd / "luts")
   }
 
   implicit val dataWidthBytes = dataType match {

@@ -146,28 +146,6 @@ namespace prose_isa_golden {
           uint16_t num_heads,
           float* attn_output
   );
-
-  void prose_mlp(float *input,
-         float *fc_wgt,
-         float *fc_bias,
-         float *proj_wgt,
-         float *proj_bias,
-         float *out,
-         int batch_size, int seq_len, int embed_size);
-
-  void prose_matadd(float* a, float* b, float* c, int sz);
-
-  void decoder_layer(
-          float *input,
-          float *ln1_wgt, float *ln1_bias,
-          float *ln2_wgt, float *ln2_bias,
-          float *qarray, float *karray, float *varray,
-          float *oarray, float *obias,
-          float *causal_mask,
-          float *mlp_fc_wgt, float *mlp_fc_bias,
-          float *mlp_proj_wgt, float *mlp_proj_bias,
-          uint8_t batch_size, uint16_t seq_len, uint16_t embed_dim, uint16_t num_heads,
-          float *attn_output);
 };
 #endif
 #endif //PROSE_COMPILER_PROSE_ISA_GOLDEN_H
