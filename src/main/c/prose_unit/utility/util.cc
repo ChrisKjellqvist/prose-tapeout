@@ -9,6 +9,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <vector>
 
 void print_matrix(float* f, int r, int c) {
   const int print_column_width = 12;
@@ -62,8 +63,14 @@ void convertRowMajorFormatToProSEColMajor(const uint16_t* in, uint16_t* out,
   }
 }
 
+#include <stdexcept>
+#include <bit>
+
 float bf16_to_float(uint16_t q) {
   uint32_t q_t = (uint32_t(q)) << 16;
+  if (q_t & 0x78f00000 == 0x78f00000) {
+	  throw std::runtime_error("AGH");
+  }
   return reinterpret_cast<float&>(q_t);
 }
 
@@ -117,7 +124,7 @@ void convertPCMtoTCM(const uint16_t* in, std::variant<uint16_t*, float*> out,
       int stripe_subIdx = row % TILE_WIDTH;
       auto base = stripe * local_N * TILE_WIDTH * batch_size;
       for (int col = 0; col < local_N; ++col) {
-        auto ele = in[base + col * TILE_WIDTH * batch_size + b * TILE_WIDTH +
+        uint16_t ele = in[base + col * TILE_WIDTH * batch_size + b * TILE_WIDTH +
                       stripe_subIdx];
         if (std::holds_alternative<float*>(out)) {
           std::get<float*>(out)[b * local_N * local_M + row * local_N + col] =
@@ -145,6 +152,13 @@ float truncate_float_to_bf16_accuracy(float q) {
   uint32_t masked = q_t & 0xFFFF0000;
   if (q_t & 0x8000) {
     masked += 0x10000;
+  }
+  if (masked == 0x8000000 && q != 0) {
+    masked = 0x80010000;
+    printf("ASDF\n");
+  } else if (masked == 0 && q != 0) {
+    masked = 0x00010000;
+    printf("ASDF\n");
   }
   return reinterpret_cast<float&>(masked);
 }
@@ -176,11 +190,14 @@ bool generous_is_equal(float q, float r) {
 }
 
 uint16_t float_to_bf16(float q) {
-  uint32_t a = reinterpret_cast<uint32_t&>(q);
-  uint16_t b = a >> 16;
-  if (a & 0x8000)
-    b += 1;
-  return b;
+  uint32_t q_t = reinterpret_cast<uint32_t&>(q);
+  uint16_t masked = uint16_t((q_t & 0xFFFF0000) >> 16);
+  if (masked == 0x8000 && q != 0) {
+    masked = 0x8001;
+  } else if (masked == 0 && q != 0) {
+    masked = 0x0001;
+  }
+  return masked;
 }
 
 #include <tuple>
@@ -291,8 +308,8 @@ std::string exec(const char* cmd) {
 std::string get_global_checkpoint_dir() {
   auto hostname = exec("hostname");
   hostname = hostname.substr(0, hostname.size() - 1);
-  if (hostname == "Christophers-MacBook-Air-2.local") {
-    return "/Users/chris/Code/prose_rtl/c_exec/src/prose_unit/neo_test/"
+  if (hostname == "Christophers-MacBook-Air-7.local") {
+    return "/Users/chris/Code/prose_rtl/src/main/c/model/gpt_neo/"
            "gen_ckpts/model_ckpts";
   } else if (hostname == "oak") {
     return "/home/chriskjellqvist/Code/prose_rtl/c_exec/src/prose_unit/"

@@ -1,0 +1,56 @@
+import torch
+
+# assume 2-bytes per element
+total_tensor_size_bytes = 0
+layer_dict = {}
+save = False
+layer_save_limit = 1e9
+
+def save_tensor(tensor, dirname, layername, layer_idx):
+    global layer_save_limit
+    global save
+    if layer_idx >= layer_save_limit or not save:
+        return
+    print("trying to save " + layername)
+    
+    # save file
+    fname = f"{dirname}/{layername}.pt"
+    torch.save(tensor, fname)
+    
+    # store the names of the layers and their dimensions in a separate text file
+    layer_dict[layername] = tensor.shape
+    
+    # update counter for total file size
+    global total_tensor_size_bytes
+    total_tensor_size_bytes += tensor.numel() * 2
+    
+def write_layer_dict(fname):
+    global save
+    if not save:
+        return
+    with open(fname, 'w') as f:
+        for key, value in layer_dict.items():
+        # split the value into a series of space separated numbers
+            k = value
+            if isinstance(k, dict):
+                k = " ".join(str(x) for x in k.values())
+            elif isinstance(k, tuple):
+                k = " ".join(str(x) for x in k)
+            elif isinstance(k, torch.Size):
+                k = " ".join(str(x) for x in k)
+            else:
+                k = " ".join(str(x) for x in k)
+            f.write(f"{key} {k}\n")
+    global total_tensor_size_bytes
+    print("Estimated model size is " + str(total_tensor_size_bytes / 1024 / 1024) + " MB if we were to convert to BF16")
+
+
+def enable_saving():
+    global save
+    save = True
+
+def set_layer_save_limit(i):
+    global layer_save_limit
+    layer_save_limit = i
+    
+

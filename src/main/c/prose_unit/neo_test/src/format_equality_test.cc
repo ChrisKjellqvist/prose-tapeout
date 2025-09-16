@@ -28,9 +28,9 @@ int main() {
                                    hidden_size);
 
   // now - use interchange format to go back and forth between bf16 and make sure the epsilon is SMALL
-  const interchange_format if_weight(c_fc_weight);
-  const interchange_format if_bias(c_fc_bias);
-  const interchange_format if_input(input);
+  const interchange_format if_weight(c_fc_weight, {D, hidden_size});
+  const interchange_format if_bias(c_fc_bias, {hidden_size});
+  const interchange_format if_input(input, {batch_size, seq_len, D});
 
   if_weight.write_bf16s_to_file("weight.bf16");
   if_bias.write_bf16s_to_file("bias.bf16");

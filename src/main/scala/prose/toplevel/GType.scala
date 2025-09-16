@@ -1,7 +1,7 @@
 package prose.toplevel
 
 import chipsalliance.rocketchip.config.Parameters
-import prose.nn_util.SpecialFunction
+import prose.SpecialFunction
 
 class GType(gtype_latency: Int)(
   kMax: Int,
@@ -9,9 +9,11 @@ class GType(gtype_latency: Int)(
   N: Int,
   SRAMLatency: Int,
   fpuLatency: Int,
+  simdLatency: Int,
   maxBatch: Int,
   maxNColsTiles: Int,
-  supportWideBias: Boolean
-)(implicit p: Parameters) extends BaseCore(kMax, Nmin, N, SRAMLatency, fpuLatency, maxBatch, supportWideBias, maxNColsTiles, Some((SpecialFunction.GELU, gtype_latency))) {
+  supportWideBias: Boolean,
+  n_arrays: Int
+)(implicit p: Parameters) extends BaseCore(kMax, Nmin, N, SRAMLatency, fpuLatency, simdLatency, maxBatch, supportWideBias, maxNColsTiles, n_arrays, Some((SpecialFunction.GELU, gtype_latency))) {
   SpecialFunction.generate(SpecialFunction.GELU)
 }

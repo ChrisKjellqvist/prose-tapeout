@@ -6,3 +6,4 @@ object NormType {
 
   val width = 1
 }
+

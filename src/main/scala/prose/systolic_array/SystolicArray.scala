@@ -13,6 +13,7 @@ class SystolicArray(N: Int,
                     withUpShift: Boolean,
                     fpuLatency: Int = 1)(implicit p: Parameters) extends Module {
   override val desiredName = s"SystolicArray_${N}x${kMax}x${maxBatch}x${fpuLatency}_shiftUp$withUpShift"
+  println(f"CREATING $desiredName")
   require(N > 0 && kMax > 0 && kMax >= N)
   val io = IO(new Bundle {
 
@@ -44,61 +45,57 @@ class SystolicArray(N: Int,
    * s_flush - let shifted values propagate before shifting left out
    * s_shift_out - shift left out
    */
-  val s_idle :: s_shift_in :: s_flush :: s_shift_out :: Nil = Enum(4)
+  val s_idle :: s_d1 :: s_shift_in :: s_flush :: s_shift_out :: Nil = Enum(5)
   val state = RegInit(s_idle)
   io.array_idle := state === s_idle
   val outputTranpose = Reg(Bool())
-
-  // the size of the loop is the batch loop accounting for pipeline stalls in the FPU. Need +1 to account
-  // for store to the FPU register
   val maxloopSize = Math.max(fpuLatency, maxBatch)
-  val loopSize = maxloopSize
-  //  val loopSize = Reg(UInt(log2Up))
-  val loopCounter = Reg(UInt(log2Up(loopSize + 1).W))
+  val loopCounter = Reg(UInt(log2Up(maxloopSize + 1).W))
   val currentBatchMO = Reg(UInt(log2Up(maxBatch).W))
 
-  val kCount, cmdK = Reg(UInt(log2Up(kMax).W))
+  val kCount, cmdK = RegInit(0.U(log2Up(Math.max(kMax, N * fpuLatency)).W))
 
   val must_consume_activation = loopCounter <= currentBatchMO
   val am_consuming_activation = WireInit(false.B)
   dontTouch(am_consuming_activation)
-  val must_consume_weight = Mux(io.weightsAreBatched, must_consume_activation, loopCounter === loopSize.U)
+  val must_consume_weight = Mux(io.weightsAreBatched, must_consume_activation, loopCounter === maxloopSize.U)
 
   /** ----------------IO init------------------ */
   io.c_out.valid := state === s_shift_out
-  val currentPEMode = Wire(PEMode())
+  val currentPEMode = WireInit(PEMode.idle)
   val routingDelay = 2
   val shiftOutRoutingDelay = Reg(UInt(2.W))
-  currentPEMode := PEMode.idle
 
   io.consume_weights := false.B
   io.consume_activations := false.B
 
-  io.cmd.ready := false.B
+  io.cmd.ready := state === s_idle
 
   val shift_anyway = WireInit(false.B)
   val routeShiftSignal = shift_anyway || !io.back_pressure
 
+  val kCpO = kCount + 1.U
+  val kc_en = WireInit(false.B)
+  val kc_sel = WireInit(false.B)
+  when (kc_en) {
+    kCount := Mux(kc_sel, kCpO, 0.U)
+  }
+
   when(state === s_idle) {
-    io.cmd.ready := true.B
-    currentPEMode := PEMode.idle
-
-    loopCounter := 0.U
-    kCount := 0.U
-
-    when(io.cmd.fire) {
+    when(io.cmd.valid) {
       cmdK := io.cmd.bits.k
       outputTranpose := io.cmd.bits.outputTranspose.getOrElse(true.B)
-      state := s_shift_in
+      state := s_d1
       currentBatchMO := io.cmd.bits.batchSizeMO
+      loopCounter := 0.U
+      kc_en := true.B
     }
+  }.elsewhen(state === s_d1) {
+    state := s_shift_in
   }.elsewhen(state === s_shift_in) {
     currentPEMode := PEMode.MAC
-
     // logical operation "a -> b"
     def implies(a: Bool, b: Bool): Bool = (a && b) || !a
-
-
     when(
       implies(must_consume_activation, io.activations_valid && io.weights_valid) &&
         implies(must_consume_weight, io.weights_valid && Mux(io.weightsAreBatched, io.activations_valid, true.B))) {
@@ -107,21 +104,23 @@ class SystolicArray(N: Int,
       io.consume_weights := must_consume_weight
       io.consume_activations := must_consume_activation
 
-      when(loopCounter === loopSize.U) {
+      when(loopCounter === maxloopSize.U) {
         loopCounter := 0.U
-        kCount := kCount + 1.U
+        kc_en := true.B
+        kc_sel := true.B
         when(kCount === cmdK) {
-          kCount := 0.U
+          kc_sel := false.B
           state := s_flush
         }
       }
     }
   }.elsewhen(state === s_flush) {
     currentPEMode := PEMode.MAC
+    kc_en := true.B
+    kc_sel := true.B
     // now that we've streamed everything in, just make sure it's all propagated through
-    kCount := kCount + 1.U
-    when(kCount === (N + fpuLatency + 1).U) {
-      kCount := 0.U
+    when(kCount === (N * fpuLatency).U) {
+      kc_sel := false.B
       state := s_shift_out
       shiftOutRoutingDelay := Mux(outputTranpose, 0.U, 2.U)
     }
@@ -138,9 +137,10 @@ class SystolicArray(N: Int,
         loopCounter := loopCounter + 1.U
         when(loopCounter === currentBatchMO) {
           loopCounter := 0.U
-          kCount := kCount + 1.U
+          kc_en := true.B
+          kc_sel := true.B
           when(kCount === (N - 1).U) {
-            kCount := 0.U
+            kc_sel := false.B
             state := s_idle
           }
         }
@@ -154,7 +154,11 @@ class SystolicArray(N: Int,
   val altShiftedEles = Wire(Vec(N, UInt(16.W)))
   leftShiftedEles := DontCare
   altShiftedEles := DontCare
-  io.c_out.bits := ShiftRegEnable(altShiftedEles, routingDelay, routeShiftSignal, clock)
+  if (withUpShift) {
+    io.c_out.bits := ShiftRegEnable(altShiftedEles, routingDelay, routeShiftSignal, clock)
+  } else {
+    io.c_out.bits := DontCare
+  }
   when(outputTranpose) {
     io.c_out.bits := leftShiftedEles
   }
@@ -162,7 +166,7 @@ class SystolicArray(N: Int,
   val pe_array = Seq.tabulate(N)(row_idx =>
     Seq.tabulate(N) { col_idx =>
       val mod = Module(new OutputStationaryPE(fpuLatency, maxBatch, withUpShift))
-      BeethovenBuild.requestSeparateCompileCell(mod.desiredName)
+      BeethovenBuild.requestModulePartition(mod.desiredName)
       mod.suggestName(f"SysArray_r${row_idx}d_c$col_idx")
     })
   pe_array.flatten.foreach {

@@ -8,17 +8,17 @@ import chisel3.util._
 import beethoven._
 import beethoven.common.Address.addrBits
 import beethoven.common._
+import prose.SpecialFunction.SpecialFunction
 import prose.activations._
 import prose.err_handling.{ErrorHandle, ProseErr}
-import prose.nn_util.SpecialFunction
-import prose.nn_util.SpecialFunction.SpecialFunction
 import prose.random.LinearFeedbackShiftRegister
-import prose.splitToChunks
+import prose.{SpecialFunction, splitToChunks}
 import prose.systolic_array.SystolicArray
 
 import scala.util.Random
 
 /**
+ * Base Systolic array core without any additional functionalities
  * @param kMax        maximum length row/column stream to stream in
  * @param Nmin        min dimension of systolic array on the accelerator. This determines alignment
  * @param N           size of systolic array in this core
@@ -33,21 +33,48 @@ abstract class BaseCore(kMax: Int,
                         N: Int,
                         SRAMLatency: Int,
                         fpuLatency: Int,
+                        simdLatency: Int,
                         maxBatch: Int,
                         supportWideBias: Boolean,
                         maxColTilesSimul: Int,
+                        n_arrays: Int,
                         specialFunc: Option[(SpecialFunction, Int)] = None,
                        )(implicit p: Parameters) extends AcceleratorCore {
-  val useFakeLUTs: Boolean = false
-
+  val useFakeLUTs: Boolean = true
+  class MatrixOpCmd extends AccelCommand("matrixOp") {
+    // ---------- WEIGHT ----------- //
+    val addrIn = Address() // weight stream
+    // ---------- OUTPUT ----------- //
+    val addrOut = Address() // output address for MatAdd and MatMul
+    val outputRowOffset = UInt(addrBits.W) // byte offset for a stripe in the output matrix
+    // ---------- CONTROL ----------- //
+    val outputTranspose = if (useUpShift) Some(Bool()) else None
+    val nColTilesToDo_MO = UInt(log2Up(maxColTilesSimul).W)
+    val nRowTilesToDo_MO = UInt(log2Up(maxColTilesSimul).W)
+    val weightsAreBatched = Bool()
+    // ---------- SOFTMAX ----------- //
+    val softmax_out = if (specialFunc.exists(_._1 == SpecialFunction.EXP)) Some(Address()) else None
+    // ---------- ACTIVATIONS ----------- //
+    val activationAddr = Address() // activation stream
+    val batchSize = UInt(batchBits.W)
+    val matrixLen = UInt((kBits + 1).W) // k (shared matrix dimension)
+    // ---------- BIAS ----------- //
+    val bias_addr = Address()
+    val bias_tx_bytes = UInt(log2Up(bias_tx_bytes_max_len * 2 + 1).W)
+    val bias_mode = UInt(2.W)
+    // ---------- NORM ----------- //
+    val norm_enable = Bool()
+    val norm_addr = Address()
+    val norm_per_batch = Bool()
+  }
   CppGeneration.addPreprocessorDefinition("PROSE")
   CppGeneration.addPreprocessorDefinition(
     Seq(
       (f"PROSE_${outer.systemParams.name}_N", N),
       (f"PROSE_Nmin", Nmin),
       (f"PROSE_maxBatch", maxBatch),
-      (f"PROSE_kMax", kMax),
-      (f"PROSE_${N}Core_maxColTiles", maxColTilesSimul)
+      (f"PROSE_${outer.systemParams.name}Core_maxColTiles", maxColTilesSimul),
+      (s"PROSE_${outer.systemParams.name}_kMax", kMax)
     )
   )
 
@@ -55,8 +82,6 @@ abstract class BaseCore(kMax: Int,
     case Some((q, _)) => q != SpecialFunction.EXP
     case None => true
   }
-  // TODO why do we need this...
-  //  assert(maxBatch >= N / Nmin)
 
   val useFakeIO = RegInit(false.B)
   val useNorms = RegInit(false.B)
@@ -72,23 +97,27 @@ abstract class BaseCore(kMax: Int,
 
   val rgen = new Random(1284884)
 
+  /**
+   * For test-chip purposes, we want to be able to test the power-consumption of the chip under load
+   * which we can't actually due with the HyperRAM bandwidth (300MBs). To get around this, we generate
+   * random normal numbers. Box-Mueller too expensive so we do 1cy LFSR + 2cy LUT but we can do this
+   * at a throughput of 1/cy
+   */
   def getReaderWrapper(name: String): (List[DecoupledIO[ChannelTransactionBundle]], List[DataChannelIO]) = if (useFakeLUTs) {
     val (reqs, dats) = getReaderModules(name)
     reqs.zipWithIndex.foreach(a => a._1.suggestName(f"requestChannel_${name}_${a._2}"))
     dats.zipWithIndex.foreach(a => a._1.suggestName(f"dataChannel_${name}_${a._2}"))
-    val maxTxLen = kMax * N * maxBatch * 2
+    val maxTxLen = kMax * N * n_arrays * maxBatch * 2
     val dwidth = dats(0).data.bits.getWidth
     val maxBeats = 1 + maxTxLen / (dwidth / 8)
     val beatCount = RegInit(0.U(log2Up(maxBeats + 1).W))
     beatCount.suggestName(f"beatCount_${name}")
-
+    // build the lut
     val _ = {
-      // build the lut
-      if (!os.exists(os.pwd / "luts" / "Normal.v")) {
-        os.proc("cmake", os.pwd /  "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
-        os.proc("make").call(cwd = os.pwd / "luts")
-        os.proc("./generate_normal").call(cwd = os.pwd / "luts")
-      }
+      os.makeDir.all(os.pwd / "luts")
+      os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
+      os.proc("make").call(cwd = os.pwd / "luts")
+      os.proc("./generate_normal", os.pwd/"luts").call(cwd = os.pwd / "luts")
     }
 
     val req_wrapper = reqs.zip(dats).zipWithIndex.map { case ((r, d), idx) =>
@@ -124,7 +153,6 @@ abstract class BaseCore(kMax: Int,
         randomGen.io.in := perSlotUInt
         randomGen.io.out
       }
-
 
       when(useFakeIO) {
         r.valid := false.B
@@ -215,35 +243,24 @@ abstract class BaseCore(kMax: Int,
   val bias_tx_bytes_max_len = maxBatch * N * kMax
 
 
-  val matrixOpCmd = BeethovenIO(new AccelCommand("matrixOp") {
-    // ---------- WEIGHT ----------- //
-    val addrIn = Address() // weight stream
-    // ---------- OUTPUT ----------- //
-    val addrOut = Address() // output address for MatAdd and MatMul
-    val outputRowOffset = UInt(addrBits.W) // byte offset for a stripe in the output matrix
-    // ---------- CONTROL ----------- //
-    val outputTranspose = if (useUpShift) Some(Bool()) else None
-    val nColTilesToDo_MO = UInt(log2Up(maxColTilesSimul).W)
-    val weightsAreBatched = Bool()
-    // ---------- SOFTMAX ----------- //
-    val softmax_out = if (specialFunc.exists(_._1 == SpecialFunction.EXP)) Some(Address()) else None
-    // ---------- ACTIVATIONS ----------- //
-    val activationAddr = Address() // activation stream
-    val batchSize = UInt(batchBits.W)
-    val matrixLen = UInt((kBits + 1).W) // k (shared matrix dimension)
-    // ---------- BIAS ----------- //
-    val bias_addr = Address()
-    val bias_tx_bytes = UInt(log2Up(bias_tx_bytes_max_len * 2 + 1).W)
-    val bias_mode = UInt(2.W)
-    // ---------- NORM ----------- //
-    val norm_enable = Bool()
-    val norm_addr = Address()
-    val norm_per_batch = Bool()
-  }, new AccelResponse("opErr") {
-    val err = UInt(3.W)
-  })
+  val matrixOpCmd = BeethovenIO(new MatrixOpCmd, new AccelResponse("opErr") {
+      val err = UInt(3.W)
+    })
 
-  //  println("ncw is " + matrixOpCmd.req.bits.nColTilesToDo_MO.getWidth)
+  // state machine for the systolic array manager
+  val s_idle :: s_start_row :: s_emit_weight_request :: s_launch_mac :: s_mac :: s_flush :: s_finish :: s_aux :: Nil = Enum(8)
+  val state = RegInit(s_idle)
+
+  // stage the command
+  val CTRL_cmdCopy = Reg(new MatrixOpCmd)
+  val active_cores_MO = Wire(UInt(log2Up(n_arrays).W))
+
+  // we hold n_arrays systolic arrays inside the module. They will share the weight stream
+  val n_arrays_mo = n_arrays - 1
+  active_cores_MO := Mux(CTRL_cmdCopy.nRowTilesToDo_MO >= n_arrays_mo.U, n_arrays_mo.U, CTRL_cmdCopy.nRowTilesToDo_MO)
+  val CTRL_weightsBaseAddressAccumulator = Reg(Address())
+  val CTRL_outputsBaseAddressAccumulator = Reg(Address())
+  val CTRL_nColTiles_MO_accumulator = Reg(UInt(log2Up(maxColTilesSimul).W))
 
   val biasNONE = 0
   val biasCOLS = 1
@@ -264,10 +281,10 @@ abstract class BaseCore(kMax: Int,
   /** *************************** ROW NORMALIZATION CONSTANT READ IN **************************** */
   val norm_idle :: norm_read :: Nil = Enum(2)
   val norm_state = RegInit(norm_idle)
-  val norm_counter_row = Reg(UInt(log2Up(N).W))
+  val norm_counter_row = Reg(UInt(log2Up(N * n_arrays).W))
   val norm_counter_batch = Reg(UInt(log2Up(maxBatch).W))
   val norm_batch_max = Reg(UInt(log2Up(maxBatch).W))
-  val norms = Reg(Vec(N, Vec(maxBatch, UInt(16.W))))
+  val norms = Reg(Vec(N * n_arrays, Vec(maxBatch, UInt(16.W))))
 
   val norm_is_ready = {
     val (List(norm_req), List(norm_dat)) = getReaderWrapper("norm_stream")
@@ -275,20 +292,22 @@ abstract class BaseCore(kMax: Int,
     norm_req.bits := DontCare
     norm_dat.data.ready := false.B
 
-    val w_norm_addr = matrixOpCmd.req.bits.norm_addr
-    val w_norm_batched = matrixOpCmd.req.bits.norm_per_batch
+    val w_norm_addr = CTRL_cmdCopy.norm_addr
+    val w_norm_batched = CTRL_cmdCopy.norm_per_batch
 
     val use_per_batch = Reg(Bool())
     when(norm_state === norm_idle) {
-      when(matrixOpCmd.req.fire) {
-        when (matrixOpCmd.req.bits.norm_enable) {
+      when(state === s_start_row) {
+        when(CTRL_cmdCopy.norm_enable) {
           norm_state := norm_read
         }
-        useNorms := matrixOpCmd.req.bits.norm_enable
-        norm_req.valid := matrixOpCmd.req.bits.norm_enable
+        useNorms := CTRL_cmdCopy.norm_enable
+        norm_req.valid := CTRL_cmdCopy.norm_enable
         norm_req.bits.addr := w_norm_addr
-        norm_req.bits.len := (N * 2).U * Mux(w_norm_batched, matrixOpCmd.req.bits.batchSize, 1.U)
-        norm_batch_max := Mux(w_norm_batched, matrixOpCmd.req.bits.batchSize - 1.U, 0.U)
+        val norm_req_len = (N * 2 * (n_arrays)).U * Mux(w_norm_batched, CTRL_cmdCopy.batchSize, 1.U)
+        norm_req.bits.len := norm_req_len
+        CTRL_cmdCopy.norm_addr := CTRL_cmdCopy.norm_addr + norm_req_len
+        norm_batch_max := Mux(w_norm_batched, CTRL_cmdCopy.batchSize - 1.U, 0.U)
         norm_counter_row := 0.U
         norm_counter_batch := 0.U
       }
@@ -304,7 +323,7 @@ abstract class BaseCore(kMax: Int,
         when(norm_counter_batch === norm_batch_max) {
           norm_counter_batch := 0.U
           norm_counter_row := norm_counter_row + 1.U
-          when(norm_counter_row === (N - 1).U) {
+          when(norm_counter_row === (N * n_arrays - 1).U) {
             norm_counter_row := 0.U
             norm_state := norm_idle
           }
@@ -315,6 +334,7 @@ abstract class BaseCore(kMax: Int,
     norm_state === norm_idle
   }
 
+  // biases are per-col
   val biasReadCtr = RegInit(0.U(log2Up(N + 1).W))
   val biasBatchCtr = Reg(UInt(log2Up(maxBatch).W))
   val bias_streams = {
@@ -327,11 +347,11 @@ abstract class BaseCore(kMax: Int,
     bias_dats.foreach { dat =>
       dat.data.ready := false.B
     }
-    val wire_b_addr = matrixOpCmd.req.bits.bias_addr
-    val wire_b_mode = matrixOpCmd.req.bits.bias_mode
-    val wire_b_len = matrixOpCmd.req.bits.bias_tx_bytes
+    val wire_b_addr = CTRL_cmdCopy.bias_addr
+    val wire_b_mode = CTRL_cmdCopy.bias_mode
+    val wire_b_len = CTRL_cmdCopy.bias_tx_bytes
 
-    when(matrixOpCmd.req.fire) {
+    when(state === s_start_row) {
       if (!supportWideBias) {
         assert(wire_b_mode =/= biasMATRIX.U && wire_b_mode =/= biasBATCHEDMATRIX.U,
           "This core was built with `supportWideBias` = false")
@@ -341,9 +361,10 @@ abstract class BaseCore(kMax: Int,
       bias_reqs(0).bits.addr := wire_b_addr
 
       bias_reqs.zipWithIndex.tail.foreach { case (req, idx) =>
+        val array_idx = idx / (N / Nmin)
         req.bits.addr := wire_b_addr + wire_b_len * idx.U
         req.bits.len := wire_b_len
-        req.valid := (wire_b_mode === biasMATRIX.U) || (wire_b_mode === biasBATCHEDMATRIX.U)
+        req.valid := ((wire_b_mode === biasMATRIX.U) || (wire_b_mode === biasBATCHEDMATRIX.U)) && (active_cores_MO >= array_idx.U)
       }
       biasBatchCtr := 0.U
       biasReadCtr := 0.U
@@ -352,33 +373,14 @@ abstract class BaseCore(kMax: Int,
     bias_dats
   }
 
-  val CTRL_outputTranspose = if (useUpShift) Reg(Bool()) else WireInit(true.B)
-  val CTRL_weightsAreBatched = Reg(Bool())
-  val CTRL_outputRowOffset = Reg(UInt(addrBits().W))
-  val CTRL_nColTiles_MO = Reg(UInt(log2Up(maxColTilesSimul).W))
-  val CTRL_weightsBaseAddress = Reg(Address())
-  val CTRL_outBaseAddress = Reg(Address())
   Seq(matrixOpCmd) foreach { q =>
     q.req.ready := false.B
   }
 
-  val s_idle :: s_emit_weight_request :: s_launch_mac :: s_mac :: s_flush :: s_finish :: s_aux :: Nil = Enum(7)
-  val state = RegInit(s_idle)
-
-  val array = Module(new SystolicArray(N, kMax, maxBatch, useUpShift, fpuLatency))
-  array.io.weightsAreBatched := CTRL_weightsAreBatched
-  val weight_consume = array.io.consume_weights
-  val activation_consume = array.io.consume_activations
-
-  weights foreach { w => w.data.ready := weight_consume }
-  activations foreach { a => a.data.ready := activation_consume }
-
-  array.io.cmd.valid := false.B
-  array.io.cmd.bits := DontCare
-
+  println(f"${outer.systemParams.name} has memory size ${kMax * maxBatch} x ${N * 16 * n_arrays}")
   val activation_buffer = Memory(
     latency = SRAMLatency,
-    dataWidth = N * 16,
+    dataWidth = N * 16 * n_arrays,
     nRows = kMax * maxBatch,
     nReadPorts = 0,
     nWritePorts = 0,
@@ -390,10 +392,9 @@ abstract class BaseCore(kMax: Int,
   val activationK = Reg(UInt(kBits.W))
   val activationBatch = Reg(UInt(batchBits.W))
 
-
   def parse(a: Seq[UInt]): Vec[UInt] = VecInit(a.reverse.flatMap(q => splitToChunks(q, 16)))
 
-  val activationFIFO = Module(new Queue(Vec(N, UInt(16.W)), SRAMLatency + 1, hasFlush = true))
+  val activationFIFO = Module(new Queue(Vec(N * n_arrays, UInt(16.W)), SRAMLatency + 1, hasFlush = true))
   activationFIFO.io.flush.get := false.B
 
   val actReadCnt = RegInit(0.U(log2Up(kMax * N * maxBatch).W))
@@ -403,15 +404,43 @@ abstract class BaseCore(kMax: Int,
   activationFIFO.io.deq.ready := false.B
   val weights_valid = weights.map(_.data.valid).fold(true.B)(_ && _)
   val activations_valid = Wire(Bool())
-  val read_active = activations_valid && array.io.consume_activations
+
+  val actChosen = Wire(Vec(N * n_arrays, UInt(16.W)))
+  val arrays = Seq.tabulate(n_arrays) { array_idx =>
+    val array = Module(new SystolicArray(N, kMax, maxBatch, useUpShift, fpuLatency))
+    array.suggestName(f"SystolicArray_$array_idx")
+    array.io.weightsAreBatched := CTRL_cmdCopy.weightsAreBatched
+    array.io.cmd.valid := false.B
+    array.io.cmd.bits := DontCare
+
+    val weightsSplit = VecInit(weights.reverse.flatMap(q => splitToChunks(q.data.bits, 16)).reverse)
+    (0 until N) foreach { i =>
+      array.io.a_in(i) := actChosen(array_idx * N + i)
+    }
+    //    array.io.a_in := actChosen
+    array.io.b_in := weightsSplit
+    array.io.activations_valid := activations_valid
+    array.io.weights_valid := weights_valid
+
+    array
+  }
+
+  val weight_consume = arrays(0).io.consume_weights
+  val activation_consume = arrays(0).io.consume_activations
+
+  weights foreach { w => w.data.ready := weight_consume }
+  activations foreach { a => a.data.ready := activation_consume }
+  val read_active = activations_valid && arrays(0).io.consume_activations
 
   val actValue = parse(activations.map(_.data.bits)).reverse
-  val actChosen = Wire(Vec(N, UInt(16.W)))
   activation_buffer.write_enable(0) := activeWriteToActivationBuffer
   activation_buffer.read_enable(0) := !activeWriteToActivationBuffer
   when(activeWriteToActivationBuffer) {
     actChosen := actValue
-    activations_valid := activations.map(_.data.valid).fold(true.B)(_ && _)
+    activations_valid := activations.zipWithIndex.map { case (act, act_idx) =>
+      val array_idx = act_idx / (N / Nmin)
+      act.data.valid || active_cores_MO < array_idx.U
+    }.fold(true.B)(_ && _)
     activation_buffer.chip_select(0) := read_active
     activation_buffer.addr(0) := actReadCnt
     activation_buffer.data_in(0) := Cat(actValue.reverse)
@@ -440,32 +469,26 @@ abstract class BaseCore(kMax: Int,
 
     actChosen := activationFIFO.io.deq.bits
     activations_valid := activationFIFO.io.deq.valid
-    activationFIFO.io.deq.ready := array.io.consume_activations
+    activationFIFO.io.deq.ready := arrays(0).io.consume_activations
   }
 
-  val weightsSplit = VecInit(weights.reverse.flatMap(q => splitToChunks(q.data.bits, 16)).reverse)
-  array.io.a_in := actChosen
-  array.io.b_in := weightsSplit
-  array.io.activations_valid := activations_valid
-  array.io.weights_valid := weights_valid
-
-  val simd_engine = Module(new ProseSIMD(N, fpuLatency, true, 16, specialFunc))
+  val simd_engine = Module(new ProseSIMD(N * n_arrays, simdLatency, true, 16, specialFunc))
   val bias_data_valid = Wire(Bool())
-
   val can_consume_array_output = simd_engine.io.readyIn && simd_engine.io.validIn
-  array.io.back_pressure := !can_consume_array_output
-  array.io.cmd.bits.batchSizeMO := activationBatch - 1.U
+  arrays.foreach(_.io.back_pressure := !can_consume_array_output)
+  arrays.foreach(_.io.cmd.bits.batchSizeMO := activationBatch - 1.U)
 
   when(biasMode === biasCOLS.U) {
     bias_data_valid := bias_streams(0).data.valid
   }.elsewhen(biasMode === biasMATRIX.U || biasMode === biasBATCHEDMATRIX.U) {
-    bias_data_valid := bias_streams.map(_.data.valid).fold(true.B)(_ && _)
+    bias_data_valid := bias_streams.zipWithIndex.map { case (bstream, stream_idx) =>
+      val array_idx = stream_idx / (N / Nmin)
+      bstream.data.valid || array_idx.U > CTRL_cmdCopy.nColTilesToDo_MO
+    }.fold(true.B)(_ && _)
   }.otherwise {
     bias_data_valid := true.B
   }
-  BeethovenBuild.requestSeparateCompileCell(simd_engine.desiredName)
-
-  simd_engine.io.validIn := array.io.c_out.valid && bias_data_valid
+  simd_engine.io.validIn := arrays(0).io.c_out.valid && bias_data_valid
   val biasColChoice = splitIntoChunks(bias_streams(0).data.bits, 16)(biasReadCtr)
   simd_engine.io.accumulator.zipWithIndex.foreach { case (acc, idx) =>
     val groupIdx = idx / Nmin
@@ -503,7 +526,12 @@ abstract class BaseCore(kMax: Int,
     }
   }
 
-  simd_engine.io.operand := array.io.c_out.bits
+  (0 until n_arrays) foreach { array_i =>
+    (0 until N) foreach { i =>
+      val idx = array_i * N + i
+      simd_engine.io.operand(idx) := arrays(array_i).io.c_out.bits(i)
+    }
+  }
   simd_engine.io.operandMult.get.zip(norms.map(_.apply(norm_counter_batch))) foreach {
     case (sink, src) =>
       sink := src
@@ -512,16 +540,57 @@ abstract class BaseCore(kMax: Int,
       }
   }
 
-  simd_engine.io.readyOut := activations_out_left.map(_.data.ready).fold(true.B)(_ && _)
-  activations_out_left.zip(simd_engine.io.out.grouped(Nmin)) foreach { case (o_stream, dat) =>
+  // when there are many writers, the complexity of the reader/writer can mix with the SIMD unit and make
+  // it hard to pass hold time
+  val simd_extra_slack_queue = Module(new Queue[Vec[UInt]](simd_engine.io.out.cloneType, 2))
+
+  simd_engine.io.readyOut := simd_extra_slack_queue.io.enq.ready
+  simd_extra_slack_queue.io.enq.valid := simd_engine.io.validOut && state =/= s_idle
+  simd_extra_slack_queue.io.enq.bits := simd_engine.io.out
+
+  simd_extra_slack_queue.io.deq.ready := activations_out_left.zipWithIndex.map { case (out_stream, stream_idx) =>
+    val array_idx = stream_idx / (N / Nmin)
+    out_stream.data.ready || array_idx.U > active_cores_MO
+  }.fold(true.B)(_ && _)
+
+  activations_out_left.zip(simd_extra_slack_queue.io.deq.bits.grouped(Nmin)).zipWithIndex foreach { case ((o_stream, dat), stream_idx) =>
+    val array_idx = stream_idx / (N / Nmin)
     o_stream.data.bits := Cat(dat.reverse)
-    o_stream.data.valid := simd_engine.io.validOut && state =/= s_idle
+    o_stream.data.valid := simd_extra_slack_queue.io.deq.valid && array_idx.U <= active_cores_MO
   }
 
   implicit val returnWithError = Wire(Bool())
   returnWithError := DontCare
 
   val can_move_to_finish = WireInit(true.B)
+
+  def increment_on_row_incr(): Unit = {
+    // activation buffer is no longer valid
+    activeWriteToActivationBuffer := true.B
+    actReadCnt := 0.U
+    // ------ reset addresses/accumulate regs for the next row ------
+    // number of rows left to do
+    CTRL_cmdCopy.nRowTilesToDo_MO := CTRL_cmdCopy.nRowTilesToDo_MO - n_arrays.U
+    // from c++: out_acc += PROSE_GCore_N * N * 2 * chosen_batch_size
+    // N in this context is a M x K x N matmul
+    //   auto output_row_increment = 2 * chosen_batch_size * PROSE_MCore_N * (output_transpose ? N : PROSE_Nmin);
+    require(isPow2(n_arrays), "need n_arrays to be power of 2 to simplify address computation. Can change implementation to not need this")
+    when (CTRL_cmdCopy.outputTranspose.getOrElse(true.B)) {
+      CTRL_cmdCopy.addrOut := CTRL_cmdCopy.addrOut +
+        Misc.multByIntPow2(CTRL_cmdCopy.batchSize * Misc.multByIntPow2(CTRL_cmdCopy.nColTilesToDo_MO +& 1.U, N), N * 2 * n_arrays)
+    }.otherwise {
+      CTRL_cmdCopy.addrOut := CTRL_cmdCopy.addrOut + Misc.multByIntPow2(CTRL_cmdCopy.batchSize, 2 * N * Nmin * n_arrays)
+    }
+
+    when (CTRL_cmdCopy.bias_mode === biasMATRIX.U || CTRL_cmdCopy.bias_mode === biasBATCHEDMATRIX.U) {
+      CTRL_cmdCopy.bias_addr := CTRL_cmdCopy.bias_addr +
+        Misc.multByIntPow2(CTRL_cmdCopy.bias_tx_bytes, N / Nmin * n_arrays)
+    }
+
+    CTRL_cmdCopy.activationAddr := CTRL_cmdCopy.activationAddr +
+      Misc.multByIntPow2(CTRL_cmdCopy.matrixLen * CTRL_cmdCopy.batchSize, N * n_arrays * 2)
+
+  }
 
   when(state === s_idle) {
     matrixOpCmd.req.ready := true.B
@@ -532,75 +601,70 @@ abstract class BaseCore(kMax: Int,
       activeWriteToActivationBuffer := true.B
       activationK := matrixOpCmd.req.bits.matrixLen - 1.U
       activationBatch := matrixOpCmd.req.bits.batchSize
-      activationFIFO.io.flush.get := true.B
-      val readLenBatched = ((matrixOpCmd.req.bits.matrixLen * matrixOpCmd.req.bits.batchSize) << log2Up(Nmin * 2)).asUInt
-      activations_req.zipWithIndex.foreach { case (req_port, idx) =>
-        req_port.valid := matrixOpCmd.req.bits.batchSize > 0.U
-        req_port.bits.len := readLenBatched
-        req_port.bits.addr := matrixOpCmd.req.bits.activationAddr + (readLenBatched * idx.U)
-
-        // error handling. In deployment we have return codes, in simulation we have asserts
-        ErrorHandle(matrixOpCmd.req.bits.batchSize === 0.U,
-          "Cannot have batch size == 0",
-          ProseErr.InvalidBatch)
-        ErrorHandle(
-          !req_port.ready,
-          "Check command stream. We weren't ready for a stream initialization",
-          ProseErr.OverlappingActivationInit)
-      }
-
-      /** ****************************** MAT MUL *************************** */
-      //      ErrorHandle(!(activationBuffer_valid || activeWriteToActivationBuffer),
-      //        "Command must have a valid activation stream, though the current activation buffer is marked invalid and" +
-      //          "the activation stream is unprimed. Please prime the activation stream.",
-      //        ProseErr.InvalidActivation)
-
-      if (useUpShift) CTRL_outputTranspose := matrixOpCmd.req.bits.outputTranspose.get
-      CTRL_weightsAreBatched := matrixOpCmd.req.bits.weightsAreBatched
-      CTRL_nColTiles_MO := matrixOpCmd.req.bits.nColTilesToDo_MO
-      CTRL_weightsBaseAddress := matrixOpCmd.req.bits.addrIn
-      CTRL_outBaseAddress := matrixOpCmd.req.bits.addrOut
-      CTRL_outputRowOffset := matrixOpCmd.req.bits.outputRowOffset
-      activations_out_req_left.zipWithIndex.foreach { case (w_o, idx) =>
-        w_o.valid := matrixOpCmd.req.bits.outputTranspose.getOrElse(true.B)
-        val wLen = (Nmin * N * 2).U * matrixOpCmd.req.bits.batchSize * (1.U +& matrixOpCmd.req.bits.nColTilesToDo_MO)
-        val wAddrStride = matrixOpCmd.req.bits.outputRowOffset
-        w_o.bits.addr := matrixOpCmd.req.bits.addrOut + wAddrStride * idx.U
-        w_o.bits.len := wLen
-        ErrorHandle(!w_o.ready,
-          "Tried to launch an output stream but channel was not ready. This is unexpected.",
-          ProseErr.DesignError)
-      }
-      state := s_emit_weight_request
+      CTRL_cmdCopy := matrixOpCmd.req.bits
+      state := s_start_row
     }
     when(matrixOpCmd.req.fire && returnWithError) {
       state := s_finish
     }
+  }.elsewhen(state === s_start_row) {
+    activationFIFO.io.flush.get := true.B
+    CTRL_nColTiles_MO_accumulator := CTRL_cmdCopy.nColTilesToDo_MO
+    CTRL_weightsBaseAddressAccumulator := CTRL_cmdCopy.addrIn
+    CTRL_outputsBaseAddressAccumulator := CTRL_cmdCopy.addrOut
+    val readLenBatched = Misc.multByIntPow2(CTRL_cmdCopy.matrixLen * CTRL_cmdCopy.batchSize, Nmin * 2)
+    activations_req.zipWithIndex.foreach { case (req_port, idx) =>
+      val array_idx = idx / (N / Nmin)
+      req_port.valid := CTRL_cmdCopy.batchSize > 0.U && array_idx.U <= active_cores_MO
+      req_port.bits.len := readLenBatched
+      req_port.bits.addr := CTRL_cmdCopy.activationAddr + (readLenBatched * idx.U)
+
+      ErrorHandle(CTRL_cmdCopy.batchSize === 0.U,
+        "Cannot have batch size == 0",
+        ProseErr.InvalidBatch)
+      ErrorHandle(
+        !req_port.ready,
+        "Check command stream. We weren't ready for a stream initialization",
+        ProseErr.OverlappingActivationInit)
+    }
+    activations_out_req_left.zipWithIndex.foreach { case (w_o, idx) =>
+      val array_idx = idx / (N / Nmin)
+      w_o.valid := CTRL_cmdCopy.outputTranspose.getOrElse(true.B) && (active_cores_MO >= array_idx.U)
+      val wLen = (Nmin * N * 2).U * CTRL_cmdCopy.batchSize * (1.U +& CTRL_cmdCopy.nColTilesToDo_MO)
+      val wAddrStride = CTRL_cmdCopy.outputRowOffset
+      w_o.bits.addr := CTRL_cmdCopy.addrOut + wAddrStride * idx.U
+      w_o.bits.len := wLen
+      ErrorHandle(!w_o.ready,
+        "Tried to launch an output stream but channel was not ready. This is unexpected.",
+        ProseErr.DesignError)
+    }
+    state := s_emit_weight_request
   }.elsewhen(state === s_emit_weight_request) {
     val can_emit = Wire(Bool())
 
-    // consts
     val wLen = Misc.multByIntPow2(activationBatch, Nmin * N * 2)
-    val wAddrStride = CTRL_outputRowOffset
+    val wAddrStride = CTRL_cmdCopy.outputRowOffset
     val sharedDim = activationK +& 1.U
     val readLenNonBatched = Misc.multByIntPow2(sharedDim, Nmin * 2)
     val readLenBatched = Misc.multByIntPow2(sharedDim * activationBatch, Nmin * 2)
-    val readLen = Mux(CTRL_weightsAreBatched, readLenBatched, readLenNonBatched)
+    val readLen = Mux(CTRL_cmdCopy.weightsAreBatched, readLenBatched, readLenNonBatched)
 
     val outs_ready = if (useUpShift) {
-      when(!CTRL_outputTranspose) {
+      when(!CTRL_cmdCopy.outputTranspose.get) {
         activations_out_req_left.zipWithIndex.foreach { case (w_o, idx) =>
-          w_o.valid := can_emit
-          w_o.bits.addr := CTRL_outBaseAddress + wAddrStride * idx.U
+          val array_idx = idx / (N / Nmin)
+          val loc_idx = idx % (N / Nmin)
+          w_o.valid := can_emit && array_idx.U <= active_cores_MO
+          w_o.bits.addr := CTRL_outputsBaseAddressAccumulator + wAddrStride * loc_idx.U + wLen * array_idx.U
           w_o.bits.len := wLen
         }
       }
-      activations_out_req_left.map(_.ready).fold(true.B)(_ && _) || CTRL_outputTranspose
+      activations_out_req_left.map(_.ready).fold(true.B)(_ && _) || CTRL_cmdCopy.outputTranspose.get
     } else true.B
 
     weights_req.zipWithIndex.foreach { case (w_r, idx) =>
       w_r.valid := can_emit
-      w_r.bits.addr := CTRL_weightsBaseAddress + readLen * idx.U
+      w_r.bits.addr := CTRL_weightsBaseAddressAccumulator + readLen * idx.U
       w_r.bits.len := readLen
       ErrorHandle(!w_r.ready,
         "Tried to launch a weight stream but channel was not ready. This is unexpected.",
@@ -611,21 +675,24 @@ abstract class BaseCore(kMax: Int,
 
     when(can_emit) {
       state := s_launch_mac
-      CTRL_weightsBaseAddress := CTRL_weightsBaseAddress + Misc.multByIntPow2(readLen, N / Nmin)
-      CTRL_outBaseAddress := CTRL_outBaseAddress +
-        Misc.multByIntPow2(Mux(CTRL_outputTranspose, wLen, CTRL_outputRowOffset), N / Nmin)
+      CTRL_weightsBaseAddressAccumulator := CTRL_weightsBaseAddressAccumulator + Misc.multByIntPow2(readLen, N / Nmin)
+      // don't need to multiply by n_arrays because the arrays are just multiplex downwards and this offset strides sideways
+      CTRL_outputsBaseAddressAccumulator := CTRL_outputsBaseAddressAccumulator +
+        Misc.multByIntPow2(Mux(CTRL_cmdCopy.outputTranspose.getOrElse(true.B), wLen, CTRL_cmdCopy.outputRowOffset), N / Nmin)
     }
   }.elsewhen(state === s_launch_mac) {
-    array.io.cmd.valid := true.B
-    array.io.cmd.bits.k := activationK
-    if (useUpShift)
-      array.io.cmd.bits.outputTranspose.get := CTRL_outputTranspose
+    arrays.zipWithIndex.foreach { case (array, idx) =>
+      array.io.cmd.valid := idx.U <= active_cores_MO
+      array.io.cmd.bits.k := activationK
+      if (useUpShift)
+        array.io.cmd.bits.outputTranspose.get := CTRL_cmdCopy.outputTranspose.get
+    }
     state := s_mac
   }.elsewhen(state === s_mac) {
-    when(CTRL_nColTiles_MO =/= 0.U) {
-      when(array.io.array_idle) {
+    when(CTRL_nColTiles_MO_accumulator =/= 0.U) {
+      when(arrays(0).io.array_idle) {
         state := s_emit_weight_request
-        CTRL_nColTiles_MO := CTRL_nColTiles_MO - 1.U
+        CTRL_nColTiles_MO_accumulator := CTRL_nColTiles_MO_accumulator - 1.U
         activationFIFO.io.flush.get := true.B
         when(activeWriteToActivationBuffer) {
           activeWriteToActivationBuffer := false.B
@@ -638,11 +705,20 @@ abstract class BaseCore(kMax: Int,
       val flushed = activations_out_left.map(_.isFlushed).fold(true.B)(_ && _)
       val req_complete = activations_out_req_left.map(_.ready).fold(true.B)(_ && _)
       when(flushed && req_complete) {
-        // we move to aux if there's some other hardware that needs to run some additional stuff before we return
-        state := Mux(can_move_to_finish, s_finish, s_aux)
         when(activeWriteToActivationBuffer) {
           activeWriteToActivationBuffer := false.B
           activationBuffer_valid := true.B
+        }
+        // we move to aux if there's some other hardware that needs to run some additional stuff before we return
+        when (can_move_to_finish) {
+          when(CTRL_cmdCopy.nRowTilesToDo_MO <= n_arrays_mo.U) {
+            state := s_finish
+          }.otherwise {
+            state := s_start_row
+            increment_on_row_incr()
+          }
+        }.otherwise {
+          state := s_aux
         }
       }
     }
@@ -656,7 +732,13 @@ abstract class BaseCore(kMax: Int,
     }
   }.elsewhen(state === s_aux) {
     when(can_move_to_finish) {
-      state := s_finish
+      when (CTRL_cmdCopy.nRowTilesToDo_MO <= n_arrays_mo.U) {
+        println("n_arrays_mo (" + outer.systemParams.name + "): " + n_arrays_mo)
+        state := s_finish
+      }.otherwise {
+        state := s_start_row
+        increment_on_row_incr()
+      }
     }
   }
 }

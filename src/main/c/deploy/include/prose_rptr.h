@@ -2,19 +2,33 @@
 #define PROSE_RPTR_H
 #include <cstdint>
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
-const beethoven::remote_ptr DEBUG(0x0L);// 1.00 KB, Total: 00 MB
-const beethoven::remote_ptr transformer_h_0_ln_1_weight(0x1000L);// 1.50 KB, Total: 00 MB
-const beethoven::remote_ptr transformer_h_0_ln_1_bias(0x2000L);// 1.50 KB, Total: 00 MB
-const beethoven::remote_ptr transformer_h_0_attn_kproj_weight(0x3000L);// 1.12 MB, Total: 00 MB
-const beethoven::remote_ptr transformer_h_0_attn_vproj_weight(0x123000L);// 1.12 MB, Total: 01 MB
-const beethoven::remote_ptr transformer_h_0_attn_qproj_weight(0x243000L);// 1.12 MB, Total: 02 MB
-const beethoven::remote_ptr transformer_h_0_attn_outproj_weight(0x363000L);// 1.12 MB, Total: 03 MB
-const beethoven::remote_ptr transformer_h_0_attn_outproj_bias(0x483000L);// 1.50 KB, Total: 05 MB
-const beethoven::remote_ptr transformer_h_0_ln_2_weight(0x484000L);// 1.50 KB, Total: 05 MB
-const beethoven::remote_ptr transformer_h_0_ln_2_bias(0x485000L);// 1.50 KB, Total: 05 MB
-const beethoven::remote_ptr transformer_h_0_mlp_cfc_weight(0x486000L);// 4.50 MB, Total: 05 MB
-const beethoven::remote_ptr transformer_h_0_mlp_cfc_bias(0x906000L);// 6.00 KB, Total: 09 MB
-const beethoven::remote_ptr transformer_h_0_mlp_cproj_weight(0x908000L);// 4.50 MB, Total: 09 MB
-const beethoven::remote_ptr transformer_h_0_mlp_cproj_bias(0xd88000L);// 1.50 KB, Total: 13.54 MB
-const uint32_t allocator_base = 0xd89000;
+constexpr beethoven::remote_ptr DEBUG(0x0L);
+constexpr beethoven::remote_ptr MASK(0x1000L);
+constexpr beethoven::remote_ptr transformer_h_0_ln_1_weight(0x2000L);
+constexpr beethoven::remote_ptr transformer_h_0_ln_1_bias(0x3000L);
+constexpr beethoven::remote_ptr transformer_h_0_attn_kproj_weight(0x4000L);
+constexpr beethoven::remote_ptr transformer_h_0_attn_vproj_weight(0x124000L);
+constexpr beethoven::remote_ptr transformer_h_0_attn_qproj_weight(0x244000L);
+constexpr beethoven::remote_ptr transformer_h_0_attn_outproj_weight(0x364000L);
+constexpr beethoven::remote_ptr transformer_h_0_attn_outproj_bias(0x484000L);
+constexpr beethoven::remote_ptr transformer_h_0_ln_2_weight(0x485000L);
+constexpr beethoven::remote_ptr transformer_h_0_ln_2_bias(0x486000L);
+constexpr beethoven::remote_ptr transformer_h_0_mlp_cfc_weight(0x487000L);
+constexpr beethoven::remote_ptr transformer_h_0_mlp_cfc_bias(0x907000L);
+constexpr beethoven::remote_ptr transformer_h_0_mlp_cproj_weight(0x909000L);
+constexpr beethoven::remote_ptr transformer_h_0_mlp_cproj_bias(0xd89000L);
+constexpr beethoven::remote_ptr transformer_h_1_ln_1_weight(0xd8a000L);
+constexpr beethoven::remote_ptr transformer_h_1_ln_1_bias(0xd8b000L);
+constexpr beethoven::remote_ptr transformer_h_1_attn_kproj_weight(0xd8c000L);
+constexpr beethoven::remote_ptr transformer_h_1_attn_vproj_weight(0xeac000L);
+constexpr beethoven::remote_ptr transformer_h_1_attn_qproj_weight(0xfcc000L);
+constexpr beethoven::remote_ptr transformer_h_1_attn_outproj_weight(0x10ec000L);
+constexpr beethoven::remote_ptr transformer_h_1_attn_outproj_bias(0x120c000L);
+constexpr beethoven::remote_ptr transformer_h_1_ln_2_weight(0x120d000L);
+constexpr beethoven::remote_ptr transformer_h_1_ln_2_bias(0x120e000L);
+constexpr beethoven::remote_ptr transformer_h_1_mlp_cfc_weight(0x120f000L);
+constexpr beethoven::remote_ptr transformer_h_1_mlp_cfc_bias(0x168f000L);
+constexpr beethoven::remote_ptr transformer_h_1_mlp_cproj_weight(0x1691000L);
+constexpr beethoven::remote_ptr transformer_h_1_mlp_cproj_bias(0x1b11000L);
+constexpr uint32_t allocator_base(0x1b12000);
 #endif

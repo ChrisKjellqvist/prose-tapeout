@@ -18,6 +18,8 @@ float *load_matrix(const std::string &filename, int rows, int cols) {
   return matrix;
 }
 
+const int seq_len = 4;
+
 std::vector<std::pair<std::string, std::vector<int>>> get_index() {
   // Load the index file
   std::ifstream file("gpt_neo/layer_dict.txt");
@@ -25,6 +27,7 @@ std::vector<std::pair<std::string, std::vector<int>>> get_index() {
   // for each line in file, it is a file name and then space separated integers
   std::string line;
   index.push_back({"DEBUG", {1024}});
+  index.push_back({"MASK", {seq_len * seq_len * 2}});
   while (std::getline(file, line)) {
     std::istringstream iss(line);
     std::string name;
@@ -92,7 +95,18 @@ int main() {
           throw std::runtime_error("?");
         }
       }
-      matrices.emplace_back((uint16_t*)debug, 1024 / 2);
+      matrices.emplace_back((uint16_t *)debug, 1024 / 2);
+    } else if (pair.first == "MASK") {
+      // first, make a bottom triangular matrix
+      uint16_t *bot_tri = new uint16_t[seq_len * seq_len];
+      for (int i = 0; i < seq_len; ++i) {
+        for (int j = 0; j < seq_len; ++i) {
+          bot_tri[i * seq_len + j] = i >= j ? 0 : 0xff80;
+        }
+      }
+      uint16_t *striped_matrix = new uint16_t[seq_len * seq_len];
+      convertRowMajorFormatToProSEColMajor(bot_tri, bot_tri, seq_len, seq_len, 1, tile_size);
+      matrices.emplace_back(striped_matrix, seq_len * seq_len);
     } else {
       auto matrix = load_matrix("gpt_neo/" + pair.first + ".npy", rows, cols);
       auto bf16_matrix = convertFloatToBF16Vector(matrix, rows * cols);

@@ -1,1 +1,0 @@
-beethoven_build_baremetal(check SOURCES core_check.cc)

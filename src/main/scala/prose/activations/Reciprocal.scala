@@ -1,5 +1,7 @@
 package prose.activations
 
+import beethoven.BeethovenBuild
+import beethoven.common.ShiftReg
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -12,13 +14,10 @@ class Reciprocal(implicit p: Parameters) extends Module {
     val in = Flipped(Decoupled(UInt(16.W)))
     val out = ValidIO(UInt(16.W))
   })
-  val divider = Module(new FPU(FPUNewImplementation(DIVSQRT = Some(2)),
-    FPFloatFormat.Fp32, 1,
-    sourceTy = p(FPUBuildMode)))
-  divider.io.req.valid := io.in.valid
 
-  divider.io.req.bits.op := FPOperation.DIV
-  // 1.0 in FP16 = 0x3f80
+  os.makeDir.all(os.pwd / "luts")
+  val divider = Module(new FPU(FPUNewImplementation(DIVSQRT = Some(3)),
+    FPFloatFormat.Fp32, 1, sourceTy = FPUSourceType.NonSelfContainedSystemVerilog))
   divider.io.req.bits.operands(0)(0) := 0x3f800000L.U
   divider.io.req.bits.operands(1)(0) := Cat(io.in.bits, 0.U(16.W))
   divider.io.req.bits.operands(2) := DontCare
@@ -27,8 +26,9 @@ class Reciprocal(implicit p: Parameters) extends Module {
   divider.io.req.bits.intFormat := DontCare
   divider.io.req.bits.roundingMode := FPRoundingMode.RNE
   divider.io.req.bits.opModifier := 0.U
-
+  divider.io.req.bits.op := FPOperation.DIV
   io.in.ready := divider.io.req.ready
+  divider.io.req.valid := io.in.valid
   io.out.valid := divider.io.resp.valid
   io.out.bits := divider.io.resp.bits.result(0)(31, 16)
   divider.io.resp.ready := true.B

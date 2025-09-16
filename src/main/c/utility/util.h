@@ -65,7 +65,6 @@ void write_to_file(const char *filename,
                    const std::vector<std::pair<uint16_t*, int>> &data,
                    std::optional<std::pair<std::string, std::vector<std::string>>> index_writeout);
 #endif
-
 #ifdef USE_TORCH
 torch::Tensor load_tensor(const std::string &filename);
 

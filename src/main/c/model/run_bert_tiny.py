@@ -10,14 +10,6 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained("Intel/dynamic_tinybert")
     model = AutoModelForQuestionAnswering.from_pretrained("Intel/dynamic_tinybert")
 
-# assume 2-bytes per element
-total_tensor_size_bytes = 0
-
-def save_tensor(tensor, filename):
-    np.save(filename, tensor.detach().numpy())
-    global total_tensor_size_bytes
-    total_tensor_size_bytes += tensor.numel() * 2
-
 def ask_question(question, context):
     inputs = tokenizer(question, context, return_tensors="pt")
     start_positions = torch.tensor([1])
@@ -38,10 +30,7 @@ def ask_question(question, context):
     return tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens(inputs["input_ids"][0][answer_start:answer_end]))
 
 if __name__ == "__main__":
-    context = ("My name is Chris. I have three cats named Simon, Garfunkel, and Goobie. I went to undergrad at the University"
-               "of Rochester for computer science. I am currently a PhD student at Duke University and doing research on"
-               "hardware accelerators and associated frameworks. I am TAing an undergrad class right now and it is the"
-               "absolute, absolute worst. Thank you for coming to my TED talk.")
+    context = ("What's my name?")
     question = "What degree am I pursuing at Duke University?"
 
     # the first layer is an embedding layer
