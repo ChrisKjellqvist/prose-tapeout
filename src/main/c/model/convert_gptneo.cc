@@ -9,11 +9,13 @@
 #include <string>
 #include <vector>
 
-float *load_matrix(const std::string &filename, int rows, int cols) {
+float *load_matrix(const std::string &filename, const std::vector<int> &dims) {
   std::ifstream file(filename, std::ios::binary);
   file.seekg(128, std::ios::beg);
-  float *matrix = new float[rows * cols];
-  file.read(reinterpret_cast<char *>(matrix), rows * cols * sizeof(float));
+  int tsize = 1;
+  for (const auto &d: dims) tsize *= d;
+  float *matrix = new float[tsize];
+  file.read(reinterpret_cast<char *>(matrix), tsize * sizeof(float));
   file.close();
   return matrix;
 }
@@ -27,7 +29,6 @@ std::vector<std::pair<std::string, std::vector<int>>> get_index() {
   // for each line in file, it is a file name and then space separated integers
   std::string line;
   index.push_back({"DEBUG", {1024}});
-  index.push_back({"MASK", {seq_len * seq_len * 2}});
   while (std::getline(file, line)) {
     std::istringstream iss(line);
     std::string name;
@@ -67,13 +68,6 @@ int main() {
   std::vector<std::pair<uint16_t *, int>> matrices;
 
   for (const auto &pair : index) {
-    int cols = pair.second[0];
-    int rows;
-    if (pair.second.size() != 2) {
-      rows = 1;
-    } else {
-      rows = pair.second[1];
-    }
     if (pair.first == "DEBUG") {
       int n_items = 1024 / sizeof(uint32_t);
       uint32_t *debug = new uint32_t[n_items];
@@ -96,24 +90,36 @@ int main() {
         }
       }
       matrices.emplace_back((uint16_t *)debug, 1024 / 2);
-    } else if (pair.first == "MASK") {
-      // first, make a bottom triangular matrix
-      uint16_t *bot_tri = new uint16_t[seq_len * seq_len];
-      for (int i = 0; i < seq_len; ++i) {
-        for (int j = 0; j < seq_len; ++i) {
-          bot_tri[i * seq_len + j] = i >= j ? 0 : 0xff80;
-        }
-      }
-      uint16_t *striped_matrix = new uint16_t[seq_len * seq_len];
-      convertRowMajorFormatToProSEColMajor(bot_tri, bot_tri, seq_len, seq_len, 1, tile_size);
-      matrices.emplace_back(striped_matrix, seq_len * seq_len);
     } else {
-      auto matrix = load_matrix("gpt_neo/" + pair.first + ".npy", rows, cols);
-      auto bf16_matrix = convertFloatToBF16Vector(matrix, rows * cols);
-      auto prose_form = new uint16_t[rows * cols];
+      int t_eles = 1;
+      for (auto &d: pair.second) {
+        t_eles *= d;
+      }
+      int rows, cols, batch;
+      switch(pair.second.size()) {
+        case 1:
+          batch = rows = 1;
+          cols = pair.second[0];
+          break;
+        case 2:
+          batch = 1;
+          rows = pair.second[0];
+          cols = pair.second[1];
+          break;
+        case 3:
+          batch = pair.second[0];
+          rows = pair.second[1];
+          cols = pair.second[2];
+          break;
+        default:
+          throw std::runtime_error("Unexpected matrix dimensionality: " + std::to_string(pair.second.size()));
+      }
+      auto matrix = load_matrix("gpt_neo/" + pair.first + ".npy", pair.second);
+      auto bf16_matrix = convertFloatToBF16Vector(matrix, t_eles);
+      auto prose_form = new uint16_t[t_eles];
       convertRowMajorFormatToProSERowMajor(bf16_matrix, prose_form, rows, cols,
-                                           1, tile_size);
-      matrices.emplace_back(prose_form, rows * cols);
+                                           batch, tile_size);
+      matrices.emplace_back(prose_form, t_eles);
     }
   }
 
@@ -123,7 +129,7 @@ int main() {
     names_only.push_back(pair.first);
   }
 
-  write_to_file("gpt_neo/prose_input.bin", matrices,
+  write_to_file("gpt_neo/prose_input", matrices,
                 {std::make_pair("gpt_neo/prose_index.txt", names_only)});
 
   // free matrices

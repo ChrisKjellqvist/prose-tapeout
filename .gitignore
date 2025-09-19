@@ -361,3 +361,6 @@ lfsrs/
 layer_dict.txt
 .bloop
 *pt
+prose_index.txt
+prose_index.raw
+prose_index.strm

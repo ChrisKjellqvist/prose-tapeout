@@ -16,12 +16,15 @@ struct promise {
 
 struct S
 {
-    coroutine f(int i = 0)
-    {
-        if (i++ < 10) {
-          co_yield true;
-        }
-        co_return;
-    }
+    // coroutine f(int i = 0)
+    // {
+    //     if (i++ < 10) {
+    //       co_yield true;
+    //     }
+    //     co_return;
+    // }
 };
 
+int main() {
+  
+}

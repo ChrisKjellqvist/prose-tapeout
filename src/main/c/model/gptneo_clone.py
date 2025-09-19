@@ -166,10 +166,13 @@ class GPTNeoSelfAttention(nn.Module):
         query = self.q_proj(hidden_states)
         key = self.k_proj(hidden_states)
         value = self.v_proj(hidden_states)
-
+        
         query = self._split_heads(query, self.num_heads, self.head_dim)
         key = self._split_heads(key, self.num_heads, self.head_dim)
         value = self._split_heads(value, self.num_heads, self.head_dim)
+
+        test_against = torch.matmul(hidden_states, self.q_proj.weight.T[:,0:64])
+        # print(query[0,0,0,0], test_against[0,0,0])
 
         if layer_past is not None:
             past_key = layer_past[0]
@@ -183,14 +186,15 @@ class GPTNeoSelfAttention(nn.Module):
             present = None
 
         attn_output, attn_weights = self._attn(query, key, value, attention_mask, head_mask)
-
+        q = attn_output.shape
         attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
+        # print(q, attn_output.shape)
         attn_output = self.out_proj(attn_output)
         attn_output = self.resid_dropout(attn_output)
 
         outputs = (attn_output, present)
-        if output_attentions:
-            outputs += (attn_weights,)
+        # if output_attentions:
+        #     outputs += (attn_weights,)
 
         return outputs  # a, present, (attentions)
 
@@ -488,6 +492,7 @@ class GPTNeoForCausalLM(GPTNeoPreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
+        # print(config)
         self.transformer = GPTNeoModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 

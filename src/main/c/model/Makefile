@@ -1,6 +1,6 @@
 # super annoying torch includes... you'll probably have to change for your system
 TORCH_OPTS = -I/usr/local/include/torch/csrc/api/include/ -I/usr/local/include/ 
-OPTS = $(TORCH_OPTS) -O2 -std=c++20
+OPTS = $(TORCH_OPTS) -O0 -g -std=c++20
 LINK_OPTS = -ltorch_cpu -ltorch -ltorch_global_deps -lc10
 ifeq ($(shell uname), Darwin)
 	LINK_OPTS += -rpath /usr/local/lib
@@ -8,7 +8,7 @@ endif
 
 .PHONY: all
 all: convert_gptneo gpt_neo/layer_dict.txt
-	./convert_gptneo
+	lldb ./convert_gptneo
 	cp prose_rptr.h ../deploy/include
 
 gpt_neo/layer_dict.txt:

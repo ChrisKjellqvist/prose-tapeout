@@ -11,11 +11,14 @@ def save_tensor(tensor, dirname, layername, layer_idx):
     global save
     if layer_idx >= layer_save_limit or not save:
         return
-    print("trying to save " + layername)
+    # print("trying to save " + layername)
     
     # save file
     fname = f"{dirname}/{layername}.pt"
-    torch.save(tensor, fname)
+    if len(tensor.shape) == 2:
+        torch.save(tensor.T, fname)
+    else:
+        torch.save(tensor, fname)
     
     # store the names of the layers and their dimensions in a separate text file
     layer_dict[layername] = tensor.shape
@@ -24,6 +27,23 @@ def save_tensor(tensor, dirname, layername, layer_idx):
     global total_tensor_size_bytes
     total_tensor_size_bytes += tensor.numel() * 2
     
+def save_tensor_spl(tensor, heads, head_size, dirname, layername, layer_idx):
+    global layer_save_limit
+    global save
+    if layer_idx >= layer_save_limit or not save:
+        return
+    # print("trying to save " + layername)
+    
+    # save file
+    for i in range(heads):
+        fname = f"{dirname}/{layername}.h{i}.pt"
+        stripe = tensor.T[:,i*head_size:(i+1)*head_size]
+        torch.save(stripe, fname)
+        layer_dict[f"{layername}.h{i}"] = stripe.shape
+        
+    global total_tensor_size_bytes
+    total_tensor_size_bytes += tensor.numel() * 2
+
 def write_layer_dict(fname):
     global save
     if not save:

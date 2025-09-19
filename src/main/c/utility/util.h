@@ -61,7 +61,7 @@ void reset_error_measurement();
 bool super_permissive_equals(float q, float r, float max_err_percentage, int idx);
 void print_max_err();
 #ifndef BAREMETAL
-void write_to_file(const char *filename,
+void write_to_file(const std::string &filename_prefix,
                    const std::vector<std::pair<uint16_t*, int>> &data,
                    std::optional<std::pair<std::string, std::vector<std::string>>> index_writeout);
 #endif
