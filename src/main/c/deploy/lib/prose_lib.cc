@@ -3,24 +3,29 @@
 //
 
 #include "auto_allocate.h"
+#ifdef LOCAL
 #include "beethoven/fpga_handle.h"
+#else
+#include "beethoven_baremetal/fpga_handle.h"
+#endif
 #include "beethoven/rocc_cmd.h"
 #include "beethoven_hardware.h"
 #include "prose_rptr.h"
 #include "prose_vec_rptr.h"
+#include <cstring>
 
 using namespace beethoven;
+fpga_handle_t handle;
 
 #ifndef LOCAL
 const constinit AllLayers all_layers;
 const constinit prose_allocations<1, 768, 1, 16, 12> my_prose_allocations =
     auto_alloc::get_prose_allocs<1, 768, 1, 16, 12>();
 #else
-fpga_handle_t handle;
 #include <sys/mman.h>
 #include <unistd.h>
 remote_ptr get_from_float_file(uint64_t offset, uint64_t len) {
-  FILE *f = fopen("../../model/gpt_neo/prose_input.bin", "r");
+  FILE *f = fopen("../../model/gpt_neo/prose_input.raw", "r");
   if (f == nullptr) {
     throw std::runtime_error("Cannot open ../../model/gpt_neo/prose_input.raw");
   }

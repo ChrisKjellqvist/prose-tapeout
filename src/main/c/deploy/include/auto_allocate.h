@@ -1,7 +1,11 @@
 #ifndef AUTO_ALLOCATE_H
 #define AUTO_ALLOCATE_H
 
+#ifdef LOCAL
+#include <beethoven/allocator/alloc.h>
+#else
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
+#endif
 #include <cassert>
 #include <prose_rptr.h>
 #ifdef LOCAL

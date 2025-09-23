@@ -1,7 +1,13 @@
 #ifndef PROSE_LIB_H
 #define PROSE_LIB_H
 
+#ifdef LOCAL
+#include <beethoven/allocator/alloc.h>
+#include <beethoven/fpga_handle.h>
+#else
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
+#include <beethoven_baremetal/fpga_handle.h>
+#endif
 #include <beethoven_hardware.h>
 
 //
@@ -10,6 +16,8 @@
 
 #include "beethoven/rocc_cmd.h"
 using namespace beethoven;
+
+extern fpga_handle_t handle;
 
 #ifdef LOCAL
 // expect that there's the input file in ../../model/gpt_neo/prose_input.bin
