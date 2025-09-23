@@ -132,6 +132,6 @@ void prose_matadd(const beethoven::remote_ptr &a,
 void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
                              const ModelConfig &config, int t_id, int layer_id);
 
-void prose_decoder(const remote_ptr &input, const ModelConfig &config,
-                   const remote_ptr &out_accumulation, int t_id, int layer_id);
+void prose_decoder(const remote_ptr &input, const remote_ptr &out,
+                   const ModelConfig &config, int t_id, int layer_id);
 #endif

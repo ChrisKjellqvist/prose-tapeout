@@ -12,7 +12,7 @@ using namespace beethoven;
 int main() {
   int t_id = 0;
 
-  prose_mh_self_attention(my_prose_allocations.input[t_id],
-                          my_prose_allocations.output[t_id],
-                          ModelConfig::GPTNeoConfig(1, 8), t_id, 0);
+  prose_decoder(my_prose_allocations.input[t_id],
+                my_prose_allocations.output[t_id],
+                ModelConfig::GPTNeoConfig(1, 8), t_id, 0);
 }

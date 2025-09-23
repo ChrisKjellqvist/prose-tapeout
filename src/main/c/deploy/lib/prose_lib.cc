@@ -29,7 +29,8 @@ remote_ptr get_from_float_file(uint64_t offset, uint64_t len) {
   if (f == nullptr) {
     throw std::runtime_error("Cannot open ../../model/gpt_neo/prose_input.raw");
   }
-  auto fptr = mmap(nullptr, len, PROT_READ, MAP_PRIVATE | MAP_FILE, fileno(f), offset);
+  auto fptr =
+      mmap(nullptr, len, PROT_READ, MAP_PRIVATE | MAP_FILE, fileno(f), offset);
   remote_ptr ptr = handle.malloc(len);
   memcpy(ptr.getHostAddr(), fptr, len);
   munmap(fptr, len);
@@ -277,23 +278,56 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
                  true, nullptr, false, false);
 }
 
-void prose_decoder(const remote_ptr &input, const ModelConfig &config,
-                   const remote_ptr &out, int t_id, int layer_id) {
+void prose_decoder(const remote_ptr &input, const remote_ptr &out,
+                   const ModelConfig &config, int t_id, int layer_id) {
   const auto &residual = input;
+#ifdef VERBOSE
+  {
+    uint32_t f_i = *(uint16_t *)input.getHostAddr();
+    f_i <<= 16;
+    float f = std::bit_cast<float>(f_i);
+    printf("input: %0.4f\n", f);
+  }
+#endif
   Norm::norm(0, all_layers.layers[layer_id].ln1_wb, input, 1, config.batch_size,
              1.0 / 768, flagLayerNorm, my_prose_allocations.ln_out[t_id], 1,
              config.D)
       .get();
+#ifdef VERBOSE
+  {
+    uint32_t f_i = *(uint16_t *)input.getHostAddr();
+    f_i <<= 16;
+    float f = std::bit_cast<float>(f_i);
+    printf("ln1: %0.4f\n", f);
+  }
+#endif
+
   prose_mh_self_attention(my_prose_allocations.ln_out[t_id], out, config, t_id,
                           layer_id);
   MatrixAdd::MatAdd(0, residual, out, residual,
                     config.D * config.batch_size * config.seq_len)
       .get();
+#ifdef VERBOSE
+  {
+    uint32_t f_i = *(uint16_t *)input.getHostAddr();
+    f_i <<= 16;
+    float f = std::bit_cast<float>(f_i);
+    printf("atn: %0.4f\n", f);
+  }
+#endif
 
   Norm::norm(0, all_layers.layers[layer_id].ln2_wb, residual, 1,
              config.batch_size, 1.0 / 768, flagLayerNorm,
              my_prose_allocations.ln_out[t_id], 1, config.D)
       .get();
+#ifdef VERBOSE
+  {
+    uint32_t f_i = *(uint16_t *)input.getHostAddr();
+    f_i <<= 16;
+    float f = std::bit_cast<float>(f_i);
+    printf("ln2: %0.4f\n", f);
+  }
+#endif
 
   // START MLP
   prose_g_matmul(my_prose_allocations.ln_out[t_id],
@@ -308,9 +342,25 @@ void prose_decoder(const remote_ptr &input, const ModelConfig &config,
                  &all_layers.layers[layer_id].mlp_proj_w, PROSE_biasCOLS,
                  config.batch_size, config.seq_len, config.D * 4, config.D,
                  true, nullptr, false, false);
-  // END MLP
-  MatrixAdd::MatAdd(0, residual, my_prose_allocations.ln_out[t_id],
-                    out,
+// END MLP
+#ifdef VERBOSE
+  {
+    uint32_t f_i = *(uint16_t *)input.getHostAddr();
+    f_i <<= 16;
+    float f = std::bit_cast<float>(f_i);
+    printf("mlp: %0.4f\n", f);
+  }
+#endif
+
+  MatrixAdd::MatAdd(0, residual, my_prose_allocations.ln_out[t_id], out,
                     config.D * config.batch_size * config.seq_len)
       .get();
+#ifdef VERBOSE
+  {
+    uint32_t f_i = *(uint16_t *)input.getHostAddr();
+    f_i <<= 16;
+    float f = std::bit_cast<float>(f_i);
+    printf("out: %0.4f\n", f);
+  }
+#endif
 }
