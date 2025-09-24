@@ -36,7 +36,7 @@ struct ModelConfig {
   const int batch_size = -1, D = -1, n_heads = -1, head_size = -1,
             n_layers = -1, norm_type = -1, seq_len = -1;
   static constexpr ModelConfig GPTNeoConfig(int batch_size, int seq_len) {
-    return ModelConfig(batch_size, 768, 1, 64, 12, flagLayerNorm, seq_len);
+    return ModelConfig(batch_size, 768, 12, 64, 12, flagLayerNorm, seq_len);
   }
   constexpr ~ModelConfig() = default;
   constexpr ModelConfig() = default;

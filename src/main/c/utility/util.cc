@@ -209,8 +209,7 @@ void write_to_file(
     FILE *f = fopen(index_writeout.value().first.c_str(), "w");
     FILE *rp = fopen("prose_rptr.h", "w");
     FILE *rc = fopen("prose_rptr.cc", "w");
-    fprintf(rc,
-            "#include \"prose_rptr.h\"\n#ifdef LOCAL\nvoid init_rptr() {\n");
+    fprintf(rc, "#include \"prose_rptr.h\"\n#ifdef LOCAL\n");
     fprintf(rp, "#ifndef PROSE_RPTR_H\n#define PROSE_RPTR_H\n");
     fprintf(rp, "#include <cstdint>\n");
     fprintf(
@@ -234,13 +233,9 @@ void write_to_file(
               "__ptr_annot__ beethoven::remote_ptr %s "
               "PTR_FROM_OFFSET_H(0x%lxL, 0x%llxL);\n",
               name.c_str(), index[i].first, index[i].second * 2);
-      fprintf(rc,
-              "%s "
-              "PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n",
-              name.c_str(), index[i].first, index[i].second * 2);
+      fprintf(rc, "beethoven::remote_ptr %s;\n", name.c_str(), index[i].first, index[i].second * 2);
     }
-    fprintf(rc, "}");
-
+    fprintf(rc, "void init_rptr() {");
     for (int i = 0; i < index.size(); ++i) {
       fprintf(f, "%s offset(%lx) len(%llx)\n",
               index_writeout.value().second[i].c_str(), index[i].first,
@@ -249,10 +244,10 @@ void write_to_file(
       std::string name = index_writeout.value().second[i];
       std::replace(name.begin(), name.end(), '.', '_');
       fprintf(rc,
-              "beethoven::remote_ptr %s "
-              "PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n",
+              "%s PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n",
               name.c_str(), index[i].first, index[i].second * 2);
     }
+    fprintf(rc, "}\n");
     fprintf(rc, "#endif");
     fprintf(rp, "constexpr uint32_t allocator_base(0x%lx);\n", addr);
     fprintf(rp, "#endif\n");

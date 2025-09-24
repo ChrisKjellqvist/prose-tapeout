@@ -361,6 +361,5 @@ lfsrs/
 layer_dict.txt
 .bloop
 *pt
-prose_index.txt
-prose_index.raw
-prose_index.strm
+src/main/c/model/gpt_neo/*
+convert_gptneo
