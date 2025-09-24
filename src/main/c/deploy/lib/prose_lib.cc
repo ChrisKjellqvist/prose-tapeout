@@ -36,9 +36,11 @@ remote_ptr get_from_float_file(uint64_t offset, uint64_t len) {
   munmap(fptr, len);
   return ptr;
 }
-const AllLayers all_layers;
-const prose_allocations<1, 768, 1, 16, 12> my_prose_allocations =
-    auto_alloc::get_prose_allocs<1, 768, 1, 16, 12>();
+AllLayers all_layers;
+prose_allocations<1, 768, 1, 16, 12> my_prose_allocations;
+void init_alloc() {
+  my_prose_allocations = auto_alloc::get_prose_allocs<1, 768, 1, 16, 12>();
+}
 #endif
 /**
  * @brief Perform a matrix multiplication operation on the input tensors with
