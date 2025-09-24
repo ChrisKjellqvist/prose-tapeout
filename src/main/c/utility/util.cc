@@ -210,7 +210,10 @@ void write_to_file(
     FILE *rp = fopen("prose_rptr.h", "w");
     fprintf(rp, "#ifndef PROSE_RPTR_H\n#define PROSE_RPTR_H\n");
     fprintf(rp, "#include <cstdint>\n");
-    fprintf(rp, "#include <beethoven_baremetal/allocator/alloc_baremetal.h>\n");
+    fprintf(
+        rp,
+        "#ifdef LOCAL\n#include <beethoven/allocator/alloc.h>\n#else\n#include "
+        "<beethoven_baremetal/allocator/alloc_baremetal.h>\n#endif\n");
     fprintf(rp, "#include \"prose_lib.h\"\n");
     if (!f) {
       printf("Failed to open file %s\n", index_writeout.value().first.c_str());
