@@ -208,17 +208,21 @@ void write_to_file(
   if (index_writeout) {
     FILE *f = fopen(index_writeout.value().first.c_str(), "w");
     FILE *rp = fopen("prose_rptr.h", "w");
+    FILE *rc = fopen("prose_rptr.cc", "w");
+    fprintf(rc,
+            "#include \"prose_rptr.h\"\n#ifdef LOCAL\nvoid init_rptr() {\n");
     fprintf(rp, "#ifndef PROSE_RPTR_H\n#define PROSE_RPTR_H\n");
     fprintf(rp, "#include <cstdint>\n");
     fprintf(
         rp,
         "#ifdef LOCAL\n#include <beethoven/allocator/alloc.h>\n#else\n#include "
         "<beethoven_baremetal/allocator/alloc_baremetal.h>\n#endif\n");
-    fprintf(rp, "#include \"prose_lib.h\"\n");
+    fprintf(rp, "#include \"prose_lib.h\"\nvoid init_rptr();\n");
     if (!f) {
       printf("Failed to open file %s\n", index_writeout.value().first.c_str());
       return;
     }
+
     for (int i = 0; i < index.size(); ++i) {
       fprintf(f, "%s offset(%lx) len(%llx)\n",
               index_writeout.value().second[i].c_str(), index[i].first,
@@ -227,10 +231,29 @@ void write_to_file(
       std::string name = index_writeout.value().second[i];
       std::replace(name.begin(), name.end(), '.', '_');
       fprintf(rp,
-              "__ptr_annot__ beethoven::remote_ptr %s = "
-              "PTR_FROM_OFFSET(0x%lxL, 0x%llxL);\n",
+              "__ptr_annot__ beethoven::remote_ptr %s "
+              "PTR_FROM_OFFSET_H(0x%lxL, 0x%llxL);\n",
+              name.c_str(), index[i].first, index[i].second * 2);
+      fprintf(rc,
+              "%s "
+              "PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n",
               name.c_str(), index[i].first, index[i].second * 2);
     }
+    fprintf(rc, "}");
+
+    for (int i = 0; i < index.size(); ++i) {
+      fprintf(f, "%s offset(%lx) len(%llx)\n",
+              index_writeout.value().second[i].c_str(), index[i].first,
+              index[i].second);
+      // replace all "." in name with "_"
+      std::string name = index_writeout.value().second[i];
+      std::replace(name.begin(), name.end(), '.', '_');
+      fprintf(rc,
+              "beethoven::remote_ptr %s "
+              "PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n",
+              name.c_str(), index[i].first, index[i].second * 2);
+    }
+    fprintf(rc, "#endif");
     fprintf(rp, "constexpr uint32_t allocator_base(0x%lx);\n", addr);
     fprintf(rp, "#endif\n");
     fprintf(f, "END: %lx\n", addr);

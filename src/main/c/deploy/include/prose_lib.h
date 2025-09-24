@@ -22,11 +22,12 @@ extern fpga_handle_t handle;
 #ifdef LOCAL
 // expect that there's the input file in ../../model/gpt_neo/prose_input.bin
 remote_ptr get_from_float_file(uint64_t offset, uint64_t len);
-#define PTR_FROM_OFFSET(off, len) (get_from_float_file(off, len))
-#define __ptr_annot__ const
+#define PTR_FROM_OFFSET_C(off, len) = (get_from_float_file(off, len))
+#define PTR_FROM_OFFSET_H(off, len) ;
+#define __ptr_annot__ extern
 #define __constructor_annot__
 #else
-#define PTR_FROM_OFFSET(off, len) (beethoven::remote_ptr(off))
+#define PTR_FROM_OFFSET_H(off, len) = (beethoven::remote_ptr(off))
 #define __constructor_annot__ constexpr
 #define __ptr_annot__ constexpr
 #endif

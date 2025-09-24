@@ -15,6 +15,7 @@ else()
   find_package(beethoven_baremetal REQUIRED)
 endif()
 
-beethoven_build(check SOURCES basic/core_check.cc lib/prose_lib.cc)
-beethoven_build(full SOURCES basic/full_check.cc lib/prose_lib.cc)
+
+beethoven_build(check SOURCES basic/core_check.cc lib/prose_lib.cc lib/prose_rptr.cc)
+beethoven_build(full SOURCES basic/full_check.cc lib/prose_lib.cc lib/prose_rptr.cc)
 beethoven_build(fib SOURCES basic/fib.cc)
