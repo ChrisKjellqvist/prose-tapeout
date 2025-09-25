@@ -371,10 +371,14 @@ class NormCoreConfig
           fpuLatencyBlock(fmaLatency = 4, sqrtLUTLatency = 4, subLatency = 4)
       )
     )
-    
+
 object NormCoreConfig
     extends BeethovenBuild(
       config = new NormCoreConfig,
       platform = KriaPlatform(),
-      buildMode = Synthesis
+      buildMode = Synthesis,
+      additional_parameter = Some({
+        case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog
+        case BQuiet       => true
+      })
     )
