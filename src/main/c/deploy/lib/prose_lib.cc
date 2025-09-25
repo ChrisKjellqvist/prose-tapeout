@@ -236,7 +236,7 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
   auto &attention_score_matrix_temp =
       my_prose_allocations.selfatten_attenscore[t_id];
   const TransformerLayer &layer = all_layers.layers[layer_id];
-  for (int head_idx = 0; head_idx < config.head_size; ++head_idx) {
+  for (int head_idx = 0; head_idx < config.n_heads; ++head_idx) {
     // QUERY PROJECTION
     prose_m_matmul(input, layer.proj_wgts[head_idx].qproj, temps[0], nullptr,
                    PROSE_biasNONE, config.batch_size, config.seq_len, config.D,

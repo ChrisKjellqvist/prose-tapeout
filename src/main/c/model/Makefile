@@ -8,7 +8,7 @@ endif
 
 .PHONY: all
 all: convert_gptneo gpt_neo/layer_dict.txt
-	./convert_gptneo
+	LD_LIBRARY_PATH=/usr/local/lib;./convert_gptneo
 	cp prose_rptr.h ../deploy/include
 	cp prose_rptr.cc ../deploy/lib
 
