@@ -1,5 +1,6 @@
 #include <beethoven/fpga_handle.h>
 #include <beethoven_hardware.h>
+#include <cmath>
 
 using namespace beethoven;
 
@@ -35,8 +36,13 @@ float *golden_ln(uint16_t *p, int l, uint16_t *gamma_beta) {
   float var = golden_var(p, l, mean);
   float *out = new float[l];
   float epsilon = 1e-5;
+  float norm = 1.0f / std::sqrtf(var + epsilon);
+  printf("mean: %0.2f, var: %0.2f, norm: %0.2f\n", mean, var, norm);
   for (int i = 0; i < l; ++i) {
-    out[i] = (asfloat(p[i]) - mean) / std::sqrtf(var + epsilon) * asfloat(gamma_beta[2*i]) + asfloat(gamma_beta[2*i+1]); 
+    float beta = asfloat(gamma_beta[2*i]);
+    float gamma = asfloat(gamma_beta[2*i+1]);
+//    printf("G(%0.2f) B(%0.2f)\n", gamma, beta);
+    out[i] = (asfloat(p[i]) - mean) * norm * gamma + beta; 
   }
   return out;
 }
@@ -46,6 +52,8 @@ int main() {
   int v_len = 32;
   int batch_size = 1;
 
+
+  fpga_handle_t handle;
   auto gam_bet = handle.malloc(v_len * 2 * 2);
   auto input = handle.malloc(v_len * 2);
   auto output = handle.malloc(v_len * 2);
@@ -61,7 +69,7 @@ int main() {
     o_ptr[i] = 0;
   }
 
-  Norm::norm(0, gam_bet, input, 1, batch_size, 1.0 / v_len, flagLayerNorm, output, 1,
+  Norm::norm(0, gam_bet, input, 1, batch_size, uint16_t(std::bit_cast<uint32_t>(float(1.0 / v_len))>>16), flagLayerNorm, output, 1,
              v_len)
       .get();
 

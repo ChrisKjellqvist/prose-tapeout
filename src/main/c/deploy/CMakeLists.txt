@@ -15,7 +15,6 @@ if (${LOCAL})
   set(EXTRA_SOURCES "${EXTRA_SOURCES} lib/kria_lib.cc")
 
   beethoven_build(norm_check SOURCES basic/norm_check.cc)
-  target_link_libraries(norm_check PUBLIC prose)
 else()
   add_compile_definitions(BAREMETAL=1)
   find_package(beethoven_baremetal REQUIRED)
