@@ -1,7 +1,4 @@
-#include "auto_allocate.h"
-#include "prose_lib.h"
 #include <beethoven/fpga_handle.h>
-#include "prose_vec_rptr.h"
 #include <beethoven_hardware.h>
 
 using namespace beethoven;
