@@ -1,11 +1,11 @@
 package prose.nn_util.norm
 
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import fpwrapper.impl.fpnew.FPUNewImplementation
 import fpwrapper.{FPFloatFormat, FPOperation, FPU}
 import prose.FPUBuildMode
+import org.chipsalliance.cde.config._
 
 class Mean(concurrentMeans: Int,
            dataWidthBytes: Int,

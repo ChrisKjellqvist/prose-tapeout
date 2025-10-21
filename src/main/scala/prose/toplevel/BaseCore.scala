@@ -1,8 +1,9 @@
 package prose.toplevel
 
 import beethoven.Generation.CppGeneration
-import beethoven.MemoryStreams.{Memory, WriterDataChannelIO}
-import chipsalliance.rocketchip.config._
+import beethoven.MemoryStreams.Memory
+import beethoven.MemoryStreams.Writers._
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
 import beethoven._

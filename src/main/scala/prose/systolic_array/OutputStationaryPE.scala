@@ -2,7 +2,7 @@ package prose.systolic_array
 
 import beethoven.Platforms.{BuildModeKey, PlatformType}
 import beethoven.{BuildMode, platform}
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
 import fpwrapper._

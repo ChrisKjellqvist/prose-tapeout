@@ -1,7 +1,7 @@
 package prose
 
 import beethoven.Generation.CppGeneration
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import beethoven._
 import fpwrapper.{FPFloatFormat, FPUSourceType}
 import fpwrapper.FPUSourceType.FPUSourceType
@@ -12,6 +12,7 @@ import prose.nn_util.residual.MatAddConfig
 import prose.toplevel.{EType, GType, MType}
 import tsmc._
 import beethoven.BuildMode.Synthesis
+import beethoven.BuildMode.Simulation
 
 object SpecialFunction extends Enumeration {
   val EXP, GELU = Value
@@ -238,7 +239,7 @@ class TEST_kria_final_config
 object TEST_kria_final_config
     extends BeethovenBuild(
       new TEST_kria_final_config,
-      buildMode = BuildMode.Synthesis,
+      buildMode = BuildMode.Simulation,
       platform = KriaPlatform(hasDebugAXICACHEPROT = true),
       additional_parameter = Some({
         case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog
@@ -376,7 +377,7 @@ object NormCoreConfig
     extends BeethovenBuild(
       config = new NormCoreConfig,
       platform = KriaPlatform(),
-      buildMode = Synthesis,
+      buildMode = Simulation,
       additional_parameter = Some({
         case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog
         case BQuiet       => true

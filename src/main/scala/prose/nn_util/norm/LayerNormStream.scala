@@ -1,6 +1,6 @@
 package prose.nn_util.norm
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
 import fpwrapper.impl.fpnew.FPUNewImplementation
