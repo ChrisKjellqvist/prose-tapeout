@@ -194,7 +194,7 @@ class TEST_kria_final_config
       new WithProse(
         List(
           SystolicType(
-            nCores = 2,
+            nCores = 1,
             namePrefix = "E",
             N = 2,
             supportWideBias = true,
@@ -202,23 +202,23 @@ class TEST_kria_final_config
             Some(SpecialFunction.EXP, 2)
           ),
           SystolicType(
-            nCores = 2,
+            nCores = 1,
             namePrefix = "M",
-            N = 8,
+            N = 4,
             supportWideBias = true,
             maxMatrixLen = GPTNEO.K_DIM * 4,
             None
           ),
           SystolicType(
-            nCores = 2,
+            nCores = 1,
             namePrefix = "G",
-            N = 4,
+            N = 2,
             supportWideBias = false,
             maxMatrixLen = GPTNEO.K_DIM,
             Some(SpecialFunction.GELU, 2)
           )
         ),
-        fpuLatency = 4,
+        fpuLatency = 3,
         SRAMLatency = 2,
         maxBatchSize = 2,
         maxNDim = 4096
@@ -238,7 +238,7 @@ class TEST_kria_final_config
 object TEST_kria_final_config
     extends BeethovenBuild(
       new TEST_kria_final_config,
-      buildMode = BuildMode.Simulation,
+      buildMode = BuildMode.Synthesis,
       platform = KriaPlatform(hasDebugAXICACHEPROT = true),
       additional_parameter = Some({
         case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog

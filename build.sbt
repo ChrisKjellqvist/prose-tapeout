@@ -18,7 +18,7 @@ lazy val prose = {
       libraryDependencies ++= Seq(
         "edu.berkeley.cs" %% "chisel3" % chiselVersion,
         "edu.duke.cs.apex" %% "fpnew-wrapper" % "0.2.34",
-        "edu.duke.cs.apex" %% "beethoven-hardware" % "0.0.45",
+        "edu.duke.cs.apex" %% "beethoven-hardware" % "0.0.51",
         "edu.duke.cs.apex" %% "asic_lib" % "0.0.0",
       ),
       resolvers += ("reposilite-repository-releases" at "http://54.165.244.214:8080/releases").withAllowInsecureProtocol(true),
