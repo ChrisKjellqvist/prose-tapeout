@@ -6,6 +6,7 @@
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
+#include <fcntl.h>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -138,6 +139,8 @@ void convertPCMtoTCM(const uint16_t *in, std::variant<uint16_t *, float *> out,
 #include <string>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <cstdio>
 
 #ifndef BAREMETAL
 
@@ -148,30 +151,36 @@ void write_to_file(
     const std::vector<std::pair<uint16_t *, int>> &data,
     std::optional<std::pair<std::string, std::vector<std::string>>>
         index_writeout) {
-  FILE *fstrm = fopen((filename_prefix + ".strm").c_str(), "wb");
-  FILE *fraw = fopen((filename_prefix + ".raw").c_str(), "w+");
+  FILE *fstrm = fopen((filename_prefix + ".strm").c_str(), "wb+");
+  remove((filename_prefix + ".raw").c_str());
+  int fraw = open((filename_prefix + ".raw").c_str(), O_RDWR | O_CREAT | O_SYNC);
+  chmod((filename_prefix + ".raw").c_str(), S_IWUSR | S_IRUSR);
   std::vector<std::pair<uintptr_t, uint64_t>> index;
-  if (!fstrm || !fraw) {
-    printf("Failed to open file %s[.raw/.strm]\n", filename_prefix.c_str());
+  if (!fstrm) {
+    printf("Failed to open file %s.strm\n", filename_prefix.c_str());
     return;
   }
+  if (fraw == -1) {
+    printf("Failed to open file %s.raw\n", filename_prefix.c_str());
+    return;
+  }
+
   uintptr_t max_addr = 0, addr = 0;
   for (auto &d : data) {
     max_addr += d.second * 2;
     if (max_addr % 4096 != 0) {
-      max_addr += 4096 - (addr % 4096);
+      max_addr += 4096 - (max_addr % 4096);
     }
   }
-  ftruncate(fileno(fraw), max_addr);
-  auto raw_file = (char *)mmap(nullptr, max_addr, PROT_WRITE,
-                               MAP_PRIVATE | MAP_FILE, fileno(fraw), 0);
+  ftruncate(fraw, max_addr);
+  uint8_t *raw_file = (uint8_t *)mmap(nullptr, max_addr, PROT_READ | PROT_WRITE,
+                               MAP_SHARED | MAP_FILE, fraw, 0);
   if (raw_file == MAP_FAILED) {
-    printf("ERROR: mmap fail: %s. %d, %d\n", strerror(errno), max_addr,
-           fileno(fraw));
+    printf("ERROR: mmap fail: %s. %d, %d\n", strerror(errno), max_addr, fraw);
     throw std::runtime_error("MMAP FAIL");
   }
 
-  // always write out data in bigendian format
+  // always write out data in littlendian format
   for (auto &d : data) {
     auto dptr = d.first;
     index.push_back(std::make_pair(addr, d.second));
@@ -181,13 +190,22 @@ void write_to_file(
         swapped[i] = (d.first[i] >> 8) | (d.first[i] << 8);
       }
       dptr = swapped;
+      delete[] swapped;
     }
     fprintf(fstrm, "@%lx\n", addr);
-    memcpy(raw_file + addr, dptr, d.second * 2);
-
+    // memcpy(raw_file + addr, dptr, d.second * 2);
+    printf("copy ADDR[%p] LEN[%x]\n", addr, d.second * 2);
     for (int i = 0; i < d.second; ++i) {
-      for (int j = 0; j < 2; ++j)
-        fprintf(fstrm, "%02x ", 0xFF & (dptr[i] >> (8 * j)));
+      for (int j = 0; j < 2; ++j) {
+        uint8_t q = 0xFF & (dptr[i] >> (8 * j));
+        fprintf(fstrm, "%02x ", q);
+        uint8_t &entry = (raw_file + addr)[i*2 + j];
+        entry = q;
+        if (entry != q) {
+          printf("INSANITY: EXPECTED[%x] SEEN[%x]\n", q, entry);
+          return;
+        }
+      }
       if (i % 8 == 7)
         fprintf(fstrm, "\n");
     }
@@ -202,8 +220,8 @@ void write_to_file(
     }
   }
   fclose(fstrm);
-  munmap(fraw, max_addr);
-  fclose(fraw);
+  close(fraw);
+  munmap(raw_file, max_addr);
 
   if (index_writeout) {
     FILE *f = fopen(index_writeout.value().first.c_str(), "w");
@@ -233,7 +251,8 @@ void write_to_file(
               "__ptr_annot__ beethoven::remote_ptr %s "
               "PTR_FROM_OFFSET_H(0x%lxL, 0x%llxL);\n",
               name.c_str(), index[i].first, index[i].second * 2);
-      fprintf(rc, "beethoven::remote_ptr %s;\n", name.c_str(), index[i].first, index[i].second * 2);
+      fprintf(rc, "beethoven::remote_ptr %s;\n", name.c_str(), index[i].first,
+              index[i].second * 2);
     }
     fprintf(rc, "void init_rptr() {");
     for (int i = 0; i < index.size(); ++i) {
@@ -243,9 +262,8 @@ void write_to_file(
       // replace all "." in name with "_"
       std::string name = index_writeout.value().second[i];
       std::replace(name.begin(), name.end(), '.', '_');
-      fprintf(rc,
-              "%s PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n",
-              name.c_str(), index[i].first, index[i].second * 2);
+      fprintf(rc, "%s PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n", name.c_str(),
+              index[i].first, index[i].second * 2);
     }
     fprintf(rc, "}\n");
     fprintf(rc, "#endif");

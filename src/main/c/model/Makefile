@@ -11,6 +11,8 @@ all: convert_gptneo gpt_neo/layer_dict.txt
 	LD_LIBRARY_PATH=/usr/local/lib;./convert_gptneo
 	cp prose_rptr.h ../deploy/include
 	cp prose_rptr.cc ../deploy/lib
+	xxd -c 64 -l 16384 ../model/gpt_neo/prose_input.raw
+	@echo "You should see some debugy-looking outputs above (all-zeroes is wrong)"
 
 gpt_neo/layer_dict.txt:
 	python run_gpt_neo.py
