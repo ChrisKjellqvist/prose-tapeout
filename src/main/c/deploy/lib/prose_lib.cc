@@ -231,6 +231,14 @@ void prose_matadd(const beethoven::remote_ptr &a,
 void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
                              const ModelConfig &config, int t_id,
                              int layer_id) {
+#ifdef LOCAL
+    printf("i\n");
+    for (int i = 0; i < 10; ++i) {
+      printf("%04x ", ((uint16_t *)input.getHostAddr())[i]);
+    }
+    printf("\n");
+#endif
+
   const remote_ptr(&temps)[4] =
       my_prose_allocations.selfatten_intermediates[t_id];
   auto &attention_score_matrix_temp =
