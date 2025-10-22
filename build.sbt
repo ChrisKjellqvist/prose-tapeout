@@ -17,7 +17,7 @@ lazy val prose = {
     .settings(
       name := "prose",
       libraryDependencies ++= Seq(
-        "edu.duke.cs.apex" %% "beethoven-hardware" % "0.1.2",
+        "edu.duke.cs.apex" %% "beethoven-hardware" % "0.1.3-dev4",
         "edu.duke.cs.apex" %% "fpnew-wrapper" % "0.3.0",
         "edu.duke.cs.apex" %% "diplomacy" % "0.0.2",
         "edu.duke.cs.apex" %% "asic_lib" % "0.0.0"

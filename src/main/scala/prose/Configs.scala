@@ -239,8 +239,8 @@ class TEST_kria_final_config
 object TEST_kria_final_config
     extends BeethovenBuild(
       new TEST_kria_final_config,
-      buildMode = BuildMode.Simulation,
-      platform = KriaPlatform(hasDebugAXICACHEPROT = true),
+      buildMode = BuildMode.Synthesis,
+      platform = KriaPlatform(),
       additional_parameter = Some({
         case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog
         case BQuiet       => true
