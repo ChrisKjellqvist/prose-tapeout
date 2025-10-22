@@ -24,7 +24,7 @@ int main() {
                 ModelConfig::GPTNeoConfig(1, 8), t_id, 0);
 #ifdef LOCAL
   for (int i = 0; i < 10; ++i) {
-    printf("%05d ",
+    printf("%04x ",
            ((uint16_t *)my_prose_allocations.output[t_id].getHostAddr())[i]);
   }
 #endif

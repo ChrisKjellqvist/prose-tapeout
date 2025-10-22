@@ -241,12 +241,28 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
     prose_m_matmul(input, layer.proj_wgts[head_idx].qproj, temps[0], nullptr,
                    PROSE_biasNONE, config.batch_size, config.seq_len, config.D,
                    config.head_size, true, nullptr, false, false);
+#ifdef LOCAL
+    printf("qproj h%d\n", head_idx);
+    for (int i = 0; i < 10; ++i) {
+      printf("%04x ", ((uint16_t *)temps[0].getHostAddr())[i]);
+    }
+    printf("\n");
+#endif
+
     // KEY PROJECTION
     prose_m_matmul(input, layer.proj_wgts[head_idx].kproj, temps[1], nullptr,
                    PROSE_biasNONE, config.batch_size, config.seq_len, config.D,
                    config.head_size,
                    false /* DOUBLE CHECK: Use non-transpose output here*/,
                    nullptr, false, false);
+#ifdef LOCAL
+    printf("kproj h%d\n", head_idx);
+    for (int i = 0; i < 10; ++i) {
+      printf("%04x ", ((uint16_t *)temps[1].getHostAddr())[i]);
+    }
+    printf("\n");
+#endif
+
     // SOFTMAX(QUERY X KEY^T)
     prose_e_matmul(
         temps[0], temps[1], attention_score_matrix_temp,
@@ -254,6 +270,14 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
         nullptr /* DOUBLE CHECK: GPTNeo doesn't use scaled attention*/,
         PROSE_biasMATRIX, config.batch_size, true, config.seq_len,
         config.head_size, config.seq_len, temps[3], false);
+#ifdef LOCAL
+    printf("e h%d\n", head_idx);
+    for (int i = 0; i < 10; ++i) {
+      printf("%04x ",
+             ((uint16_t *)attention_score_matrix_temp.getHostAddr())[i]);
+    }
+    printf("\n");
+#endif
 
     // VALUE PROJECTION
     prose_m_matmul(input, layer.proj_wgts[head_idx].vproj, temps[2], nullptr,
@@ -264,6 +288,13 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
                    false, // weights are batched (no)
                    false  // norm-per-batch (no)
     );
+#ifdef LOCAL
+    printf("vproj h%d\n", head_idx);
+    for (int i = 0; i < 10; ++i) {
+      printf("%04x ", ((uint16_t *)temps[2].getHostAddr())[i]);
+    }
+    printf("\n");
+#endif
 
     // ATTENTION OUTPUT
     prose_m_matmul(attention_score_matrix_temp, temps[2], temps[1], nullptr,
@@ -274,10 +305,24 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
                    12    // stripe stride will hop across all of the other heads
 
     );
+#ifdef LOCAL
+    printf("score h%d\n", head_idx);
+    for (int i = 0; i < 10; ++i) {
+      printf("%04x ", ((uint16_t *)temps[1].getHostAddr())[i]);
+    }
+    printf("\n");
+#endif
   }
   prose_m_matmul(temps[1], layer.oproj_w, out, &layer.oproj_b, PROSE_biasCOLS,
                  config.batch_size, config.seq_len, config.head_size, config.D,
                  true, nullptr, false, false);
+#ifdef LOCAL
+  printf("oproj\n");
+  for (int i = 0; i < 10; ++i) {
+    printf("%04x ", ((uint16_t *)out.getHostAddr())[i]);
+  }
+  printf("\n");
+#endif
 }
 
 void prose_decoder(const remote_ptr &input, const remote_ptr &out,
