@@ -5,8 +5,8 @@
 #else
 #include <beethoven_baremetal/fpga_handle.h>
 #endif
-#include <beethoven_hardware.h>
 #include "prose_vec_rptr.h"
+#include <beethoven_hardware.h>
 
 using namespace beethoven;
 
@@ -16,10 +16,16 @@ int main() {
 #ifdef LOCAL
   init_alloc();
   init_rptr();
-  all_layers = AllLayers(); 
+  all_layers = AllLayers();
 #endif
 
   prose_decoder(my_prose_allocations.input[t_id],
                 my_prose_allocations.output[t_id],
                 ModelConfig::GPTNeoConfig(1, 8), t_id, 0);
+#ifdef LOCAL
+  for (int i = 0; i < 10; ++i) {
+    printf("%05d ",
+           ((uint16_t *)my_prose_allocations.output[t_id].getHostAddr())[i]);
+  }
+#endif
 }
