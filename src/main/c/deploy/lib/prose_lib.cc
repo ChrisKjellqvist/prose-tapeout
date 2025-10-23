@@ -3,8 +3,10 @@
 //
 
 #include "auto_allocate.h"
+#ifdef LOCAL
 #include "beethoven/fpga_handle.h"
 #include "beethoven/rocc_cmd.h"
+#endif
 #include "beethoven_hardware.h"
 #include "prose_rptr.h"
 #include "prose_vec_rptr.h"
@@ -194,11 +196,12 @@ void prose_g_matmul(remote_ptr const &activations, remote_ptr const &weights,
   if (biasMode != PROSE_biasNONE)
     bias_acc = *bias;
 
-  GCore::matrixOp(0, act_acc, weights, out_acc, chosen_batch_size, bias_acc,
+  auto handle =GCore::matrixOp(0, act_acc, weights, out_acc, chosen_batch_size, bias_acc,
                   biasMode, bias_sz_bytes, K, cols_mo, row_execs_to_do - 1,
                   norm_acc, use_norms, norm_per_batch,
-                  output_substripe_sz_bytes, true, false)
-      .get();
+                  output_substripe_sz_bytes, true, false);
+  
+  while (handle.try_get())
 }
 
 void prose_layer_norm(const beethoven::remote_ptr &input,

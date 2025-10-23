@@ -8,10 +8,10 @@
 // Created by Christopher Kjellqvist on 9/30/24.
 //
 
+#include "beethoven/rocc_cmd.h"
 using namespace beethoven;
 
 #ifdef LOCAL
-#include "beethoven/rocc_cmd.h"
 // expect that there's the input file in ../../model/gpt_neo/prose_input.bin
 remote_ptr get_from_float_file(uint64_t offset, uint64_t len);
 #define PTR_FROM_OFFSET(off, len) (get_from_float_file(off, len))
@@ -51,7 +51,7 @@ struct TransformerLayer {
   static const int n_layers = 12;
 
   ProjLayer proj_wgts[n_layers];
-  beethioven::remote_ptr ln1_wb;
+  beethoven::remote_ptr ln1_wb;
   beethoven::remote_ptr oproj_w, oproj_b;
   beethoven::remote_ptr ln2_wb;
   beethoven::remote_ptr mlp_fc_w, mlp_fc_b;
@@ -78,12 +78,12 @@ struct TransformerLayer {
  * @param write_out output tensor for the normalization values provided by
  * softmax
  */
-void prose_e_matmul(remote_ptr const &activations, remote_ptr const &weights,
+prose_thread prose_e_matmul_nb(remote_ptr const &activations, remote_ptr const &weights,
                     remote_ptr const &out, remote_ptr const *bias,
                     remote_ptr const *norms, int biasMode,
                     int chosen_batch_size, bool weights_are_batched, int M,
                     int K, int N, remote_ptr const &write_out,
-                    bool norm_per_batch);
+                    bool norm_per_batch, const dec_dep* dep, const int head_id);
 /**
  * @brief Perform a matrix multiplication operation on the input tensors with NO
  * activation We perform the operation: out = norm * (activations * weights) +
@@ -99,31 +99,30 @@ void prose_e_matmul(remote_ptr const &activations, remote_ptr const &weights,
  * @param output_transpose
  * @param norms
  */
-void prose_m_matmul(remote_ptr const &activations, remote_ptr const &weights,
+prose_thread prose_m_matmul_nb(remote_ptr const &activations, remote_ptr const &weights,
                     remote_ptr const &out, remote_ptr const *bias, int biasMode,
                     int chosen_batch_size, int M, int K, int N,
                     bool output_transpose, remote_ptr const *norms,
-                    bool weights_are_batched, bool norm_per_batch,
+                    bool weights_are_batched, bool norm_per_batch, M_type which_m, dec_dep* dep, const int head_id,
                     int stripe_stride = 1);
 
-void prose_g_matmul(remote_ptr const &activations, remote_ptr const &weights,
+prose_thread prose_g_matmul_nb(remote_ptr const &activations, remote_ptr const &weights,
                     remote_ptr const *norms, remote_ptr const *bias,
                     remote_ptr const &out, int chosen_batch_size, int M, int K,
-                    int N, bool norm_per_batch, int biasMode);
+                    int N, bool norm_per_batch, int biasMode, dec_dep* dep);
 
-void prose_layer_norm(const beethoven::remote_ptr &input,
+prose_thread prose_layer_norm_nb(const beethoven::remote_ptr &input,
                       const beethoven::remote_ptr &gamma_beta,
                       const uint8_t &batch_size, const uint16_t &input_length,
                       const uint16_t &seq_len,
-                      const beethoven::remote_ptr &out);
+                      const beethoven::remote_ptr &out, dec_dep* dep, DecoderMask which_norm);
 
-void prose_matadd(const beethoven::remote_ptr &a,
+prose_thread prose_matadd_nb(const beethoven::remote_ptr &a,
                   const beethoven::remote_ptr &b,
-                  const beethoven::remote_ptr &c, const uint32_t &length);
+                  const beethoven::remote_ptr &c, const uint32_t &length,
+                dec_dep* dep, DecoderMask which_add);
 
-void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
-                             const ModelConfig &config, int t_id, int layer_id);
 
-void prose_decoder(const remote_ptr &input, const ModelConfig &config,
-                   const remote_ptr &out_accumulation, int t_id, int layer_id);
+prose_thread prose_decoder_nb(const remote_ptr &input, const ModelConfig &config,
+                   const remote_ptr &out_accumulation, int t_id, int layer_id, dec_dep* dep, DecoderMask which_norm);
 #endif
