@@ -14,8 +14,11 @@ object PEMode extends chisel3.ChiselEnum {
   val idle, MAC, left_shift = Value
 }
 
-class OutputStationaryPE(fpuLatency: Int, maxBatch: Int, withUpShift: Boolean)(implicit p: Parameters) extends Module {
-  override val desiredName = s"OutputStationaryPE_b${maxBatch}_l${fpuLatency}_up$withUpShift"
+class OutputStationaryPE(fpuLatency: Int, maxBatch: Int, withUpShift: Boolean)(
+    implicit p: Parameters
+) extends Module {
+  override val desiredName =
+    s"OutputStationaryPE_b${maxBatch}_l${fpuLatency}_up$withUpShift"
   val io = IO(new Bundle {
     val syncResetIn = Input(Bool())
     val shiftOutLeft = Input(Bool())
@@ -42,15 +45,14 @@ class OutputStationaryPE(fpuLatency: Int, maxBatch: Int, withUpShift: Boolean)(i
     val batchSizeMOInLeft = Input(UInt(log2Up(maxBatch).W))
     val batchSizeMOOutRight = Output(UInt(log2Up(maxBatch).W))
   })
-  /**
-   * NOTE: this implementation DOES NOT consider the FPU latency, the master NEEDS to account for this in the
-   * control of the `validIn` signal.
-   */
+
+  /** NOTE: this implementation DOES NOT consider the FPU latency, the master
+    * NEEDS to account for this in the control of the `validIn` signal.
+    */
   val batchSizeMO = Reg(UInt(log2Up(maxBatch).W))
   val batchCountRead, batchCountWrite = RegInit(0.U(log2Up(maxBatch).W))
   batchSizeMO := io.batchSizeMOInLeft
   io.batchSizeMOOutRight := batchSizeMO
-
 
   val accumulatorVec = Reg(Vec(maxBatch, UInt(32.W)))
 //  val acc_debug_asBF16 = accumulatorVec.map(acc => Cat(acc(31, 16), 0.U(16.W)))
@@ -59,14 +61,12 @@ class OutputStationaryPE(fpuLatency: Int, maxBatch: Int, withUpShift: Boolean)(i
 
   val fma = Module(
     new FPU(
-      if (platform.platformType == PlatformType.FPGA && p(BuildModeKey)==BuildMode.Synthesis) {
-        XilinxFPUImplementation(XilinxOperator.FMA, fpuLatency)
-      } else {
-        FPUNewImplementation(ADDMUL = Some(fpuLatency))
-      },
+      FPUNewImplementation(ADDMUL = Some(fpuLatency)),
       FPFloatFormat.Fp32,
       lanes = 1,
-      sourceTy = p(FPUBuildMode)))
+      sourceTy = p(FPUBuildMode)
+    )
+  )
   // BPF16 has same # exp bits as FP32
   fma.io.req.bits.operands(0)(0) := Cat(io.north_in, 0.U(16.W))
   fma.io.req.bits.operands(1)(0) := Cat(io.west_in, 0.U(16.W))
@@ -117,20 +117,27 @@ class OutputStationaryPE(fpuLatency: Int, maxBatch: Int, withUpShift: Boolean)(i
     val isNonZero = currentRead(15, 0) =/= 0.U
     val sign = currentRead(31)
 
-    io.shift_out := Mux(isVerySmall && isNonZero, Cat(sign, 1.U(15.W)), roundBF16) // this is RNE rounding, maybe dont use?
-    when (io.shiftOutLeft) {
+    io.shift_out := Mux(
+      isVerySmall && isNonZero,
+      Cat(sign, 1.U(15.W)),
+      roundBF16
+    ) // this is RNE rounding, maybe dont use?
+    when(io.shiftOutLeft) {
       accumulatorVec(batchCountRead) := Cat(io.shift_in, 0.U(16.W))
     }
-      when(io.shiftOutAlt.getOrElse(false.B)) {
-        accumulatorVec(batchCountRead) := Cat(io.south_in.getOrElse(0.U), 0.U(16.W))
-      }
+    when(io.shiftOutAlt.getOrElse(false.B)) {
+      accumulatorVec(batchCountRead) := Cat(
+        io.south_in.getOrElse(0.U),
+        0.U(16.W)
+      )
+    }
     batchCountRead := batchCountRead + 1.U
     when(batchCountRead === batchSizeMO) {
       batchCountRead := 0.U
     }
   }
 
-   // Uncomment this to make verilator log a version that is in FP32 format
+  // Uncomment this to make verilator log a version that is in FP32 format
   val north_as_float, west_as_float = Wire(UInt(32.W))
   north_as_float := Cat(io.north_in, 0.U(16.W))
   west_as_float := Cat(io.west_in, 0.U(16.W))
