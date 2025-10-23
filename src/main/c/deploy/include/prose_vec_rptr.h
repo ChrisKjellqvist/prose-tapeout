@@ -98,4 +98,4 @@ struct AllLayers {
   }
 };
 
-extern const AllLayers all_layers;
+__ptr_annot__ AllLayers all_layers;

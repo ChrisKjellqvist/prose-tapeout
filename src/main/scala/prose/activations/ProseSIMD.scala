@@ -1,7 +1,6 @@
 package prose.activations
 
 import beethoven._
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.stage.ChiselStage
 import chisel3.util.Cat
@@ -13,6 +12,7 @@ import fpwrapper.impl.xilinx.{XilinxFPUImplementation, XilinxOperator}
 import prose.{FPUBuildMode, SpecialFunction}
 import prose.SpecialFunction.SpecialFunction
 import prose.random.ShiftRegEnableReset
+import chipsalliance.rocketchip.config._
 
 class ProseSIMD(vectorDepth: Int,
                 fpuLatency: Int,

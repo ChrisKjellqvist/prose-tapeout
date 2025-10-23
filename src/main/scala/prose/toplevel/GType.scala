@@ -1,6 +1,6 @@
 package prose.toplevel
 
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
 import prose.SpecialFunction
 
 class GType(gtype_latency: Int)(

@@ -1,7 +1,13 @@
 #ifndef PROSE_LIB_H
 #define PROSE_LIB_H
 
+#ifdef LOCAL
+#include <beethoven/allocator/alloc.h>
+#include <beethoven/fpga_handle.h>
+#else
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
+#include <beethoven_baremetal/fpga_handle.h>
+#endif
 #include <beethoven_hardware.h>
 
 //
@@ -10,15 +16,18 @@
 
 using namespace beethoven;
 
+extern fpga_handle_t handle;
+
 #ifdef LOCAL
 #include "beethoven/rocc_cmd.h"
 // expect that there's the input file in ../../model/gpt_neo/prose_input.bin
 remote_ptr get_from_float_file(uint64_t offset, uint64_t len);
-#define PTR_FROM_OFFSET(off, len) (get_from_float_file(off, len))
-#define __ptr_annot__ const
+#define PTR_FROM_OFFSET_C(off, len) = (get_from_float_file(off, len))
+#define PTR_FROM_OFFSET_H(off, len) ;
+#define __ptr_annot__ extern
 #define __constructor_annot__
 #else
-#define PTR_FROM_OFFSET(off, len) (beethoven::remote_ptr(off))
+#define PTR_FROM_OFFSET_H(off, len) = (beethoven::remote_ptr(off))
 #define __constructor_annot__ constexpr
 #define __ptr_annot__ constexpr
 #endif
@@ -124,6 +133,6 @@ void prose_matadd(const beethoven::remote_ptr &a,
 void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
                              const ModelConfig &config, int t_id, int layer_id);
 
-void prose_decoder(const remote_ptr &input, const ModelConfig &config,
-                   const remote_ptr &out_accumulation, int t_id, int layer_id);
+void prose_decoder(const remote_ptr &input, const remote_ptr &out,
+                   const ModelConfig &config, int t_id, int layer_id);
 #endif

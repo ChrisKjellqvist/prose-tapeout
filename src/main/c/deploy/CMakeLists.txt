@@ -6,15 +6,26 @@ option(LOCAL OFF)
 include_directories(include)
 message(STATUS "LOCAL: ${LOCAL}")
 set(EXTRA_SOURCES "")
+
+add_library(prose lib/prose_lib.cc lib/prose_rptr.cc)
+
 if (${LOCAL})
   add_compile_definitions(LOCAL=1)
   find_package(beethoven REQUIRED)
   set(EXTRA_SOURCES "${EXTRA_SOURCES} lib/kria_lib.cc")
+
+  beethoven_build(norm_check SOURCES basic/norm_check.cc)
 else()
   add_compile_definitions(BAREMETAL=1)
   find_package(beethoven_baremetal REQUIRED)
 endif()
+link_beethoven_to_target(prose)
 
-beethoven_build(check SOURCES basic/core_check.cc lib/prose_lib.cc)
-beethoven_build(full SOURCES basic/full_check.cc lib/prose_lib.cc)
+beethoven_build(decoder SOURCES basic/decoder_check.cc)
+beethoven_build(full SOURCES basic/full_check.cc)
 beethoven_build(fib SOURCES basic/fib.cc)
+beethoven_build(sanity_m SOURCES basic/sanity_check_m.cc)
+
+target_link_libraries(decoder PUBLIC prose)
+target_link_libraries(full PUBLIC prose)
+target_link_libraries(sanity_m PUBLIC prose)

@@ -3,7 +3,7 @@ package prose.activations
 import chisel3._
 import beethoven._
 import beethoven.common.{ShiftReg, ShiftRegEnable}
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
 
 /**
  * Look in resource folder for Lookup Table with provided name and wrap it in a BlackBox

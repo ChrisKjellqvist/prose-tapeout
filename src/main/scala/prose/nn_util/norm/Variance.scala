@@ -1,7 +1,7 @@
 package prose.nn_util.norm
 
 import beethoven.common.ShiftReg
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import fpwrapper._

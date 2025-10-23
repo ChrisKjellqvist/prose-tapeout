@@ -1,7 +1,9 @@
 package prose.toplevel
 
 import beethoven.common.Misc
-import chipsalliance.rocketchip.config.Parameters
+import chipsalliance.rocketchip.config._
+import beethoven.MemoryStreams._
+
 import chisel3.util._
 import chisel3._
 import prose.activations.{ProseSIMD, Reciprocal}

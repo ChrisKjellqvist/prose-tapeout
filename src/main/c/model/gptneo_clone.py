@@ -271,9 +271,12 @@ class GPTNeoBlock(nn.Module):
     ):
         residual = hidden_states
         if self.exec_number == 0:
+            print("input: ", hidden_states[0,0,0])
             save_tensor(hidden_states, "gpt_neo", f"transformer.h.{self.layer_id}_aa_input", self.layer_id)
-        self.exec_number += 1
+        
         hidden_states = self.ln_1(hidden_states)
+        if self.exec_number == 0:
+            print("ln1: ", hidden_states[0,0,0])
         attn_outputs = self.attn(
             hidden_states,
             layer_past=layer_past,
@@ -286,18 +289,29 @@ class GPTNeoBlock(nn.Module):
         outputs = attn_outputs[1:]
         # residual connection
         hidden_states = attn_output + residual
+        if self.exec_number == 0:
+            print("atn: ", hidden_states[0,0,0])
 
         residual = hidden_states
         hidden_states = self.ln_2(hidden_states)
+        if self.exec_number == 0:
+            print("ln2: ", hidden_states[0,0,0])
+
         feed_forward_hidden_states = self.mlp(hidden_states)
+        if self.exec_number == 0:
+            print("mlp: ", hidden_states[0,0,0])
+
         # residual connection
         hidden_states = residual + feed_forward_hidden_states
-
+        if self.exec_number == 0:
+            print("out: ", hidden_states[0,0,0])
+            print()
+            
         if use_cache:
             outputs = (hidden_states,) + outputs
         else:
             outputs = (hidden_states,) + outputs[1:]
-
+        self.exec_number += 1
         return outputs  # hidden_states, present, (attentions, cross_attentions)
 
 

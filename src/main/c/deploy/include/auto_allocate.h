@@ -1,7 +1,11 @@
 #ifndef AUTO_ALLOCATE_H
 #define AUTO_ALLOCATE_H
 
+#ifdef LOCAL
+#include <beethoven/allocator/alloc.h>
+#else
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
+#endif
 #include <cassert>
 #include <prose_rptr.h>
 #ifdef LOCAL
@@ -55,7 +59,7 @@ constexpr inline void align_to_4K(uint32_t &allocator) {
 
 template <uint32_t n_threads, uint32_t dim, uint32_t batch_size,
           uint32_t context_length, uint32_t n_heads>
-#ifndef KRIA
+#ifndef LOCAL
 constexpr
 #endif
     prose_allocations<n_threads, dim, batch_size, context_length, n_heads>
@@ -68,7 +72,7 @@ constexpr
   beethoven::remote_ptr selfatten_intermediates[n_threads][4];
   beethoven::remote_ptr mlp_intermediate[n_threads];
   beethoven::remote_ptr attenscore[n_threads];
-  #ifndef KRIA
+#ifndef LOCAL
 #define ALLOC(amt) (beethoven::remote_ptr(alloc(allocator, (amt))))
 #else
 #define ALLOC(amt) (handle.malloc(amt))
@@ -79,10 +83,9 @@ constexpr
     output[i] = ALLOC(batch_size * dim * context_length * 2);
     ln_out[i] = ALLOC(batch_size * dim * context_length * 2);
     mlp_intermediate[i] = ALLOC(batch_size * dim * 4 * context_length * 2);
-    for (auto j = 0; j < 3; ++j) {
-      selfatten_intermediates[i][j] =
-          ALLOC(batch_size * head_size * context_length * 2);
-    }
+    selfatten_intermediates[i][0] = ALLOC(batch_size * head_size * context_length * 2);
+    selfatten_intermediates[i][1] = ALLOC(batch_size * dim * context_length * 2);
+    selfatten_intermediates[i][2] = ALLOC(batch_size * head_size * context_length * 2);
     selfatten_intermediates[i][3] = ALLOC(2 * dim);
     attenscore[i] = ALLOC(2 * batch_size * context_length * context_length);
   }
@@ -93,6 +96,13 @@ constexpr
 }
 } // namespace auto_alloc
 
-extern const prose_allocations<1, 768, 1, 16, 12> my_prose_allocations;
+extern
+#ifndef LOCAL
+const
+#endif
+prose_allocations<1, 768, 1, 16, 12> my_prose_allocations;
+#ifdef LOCAL
+void init_alloc();
+#endif
 
 #endif
