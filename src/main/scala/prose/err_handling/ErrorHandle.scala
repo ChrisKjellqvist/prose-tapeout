@@ -2,7 +2,7 @@ package prose.err_handling
 
 import beethoven.Platforms.BuildModeKey
 import beethoven._
-import org.chipsalliance.cde.config._
+import chipsalliance.rocketchip.config._
 import chisel3._
 
 object ErrorHandle {

@@ -2,7 +2,7 @@ package prose.nn_util.residual
 
 import beethoven._
 import beethoven.common._
-import org.chipsalliance.cde.config._
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import fpwrapper.{FPFloatFormat, FPOperation, FPRoundingMode, FPU, FPUSourceType}

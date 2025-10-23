@@ -1,7 +1,7 @@
 package prose.systolic_array.util
 
 import beethoven.common.ShiftReg
-import org.chipsalliance.cde.config._
+import chipsalliance.rocketchip.config._
 import chisel3._
 
 /**

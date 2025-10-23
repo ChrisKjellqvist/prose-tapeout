@@ -2,7 +2,7 @@ package prose.activations
 
 import beethoven.BeethovenBuild
 import beethoven.common.ShiftReg
-import org.chipsalliance.cde.config._
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
 import fpwrapper.{FPFloatFormat, FPOperation, FPRoundingMode, FPU, FPUSourceType}

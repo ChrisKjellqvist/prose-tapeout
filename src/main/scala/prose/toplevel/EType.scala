@@ -1,8 +1,8 @@
 package prose.toplevel
 
 import beethoven.common.Misc
-import org.chipsalliance.cde.config._
-import beethoven.MemoryStreams.Writers._
+import chipsalliance.rocketchip.config._
+import beethoven.MemoryStreams._
 
 import chisel3.util._
 import chisel3._

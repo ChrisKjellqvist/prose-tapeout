@@ -12,7 +12,7 @@ import fpwrapper.impl.xilinx.{XilinxFPUImplementation, XilinxOperator}
 import prose.{FPUBuildMode, SpecialFunction}
 import prose.SpecialFunction.SpecialFunction
 import prose.random.ShiftRegEnableReset
-import org.chipsalliance.cde.config._
+import chipsalliance.rocketchip.config._
 
 class ProseSIMD(vectorDepth: Int,
                 fpuLatency: Int,

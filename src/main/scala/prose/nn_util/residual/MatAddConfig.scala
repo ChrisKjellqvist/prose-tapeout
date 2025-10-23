@@ -1,6 +1,6 @@
 package prose.nn_util.residual
 
-import org.chipsalliance.cde.config._
+import chipsalliance.rocketchip.config._
 import beethoven._
 
 class MatAddConfig(nCores: Int, fpuLatency: Int, N: Int, maxLength: Int) extends AcceleratorConfig({

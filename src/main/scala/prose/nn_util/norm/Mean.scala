@@ -5,7 +5,7 @@ import chisel3.util._
 import fpwrapper.impl.fpnew.FPUNewImplementation
 import fpwrapper.{FPFloatFormat, FPOperation, FPU}
 import prose.FPUBuildMode
-import org.chipsalliance.cde.config._
+import chipsalliance.rocketchip.config._
 
 class Mean(concurrentMeans: Int,
            dataWidthBytes: Int,

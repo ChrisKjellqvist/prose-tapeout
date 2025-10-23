@@ -2,7 +2,7 @@ package prose.nn_util.norm
 import chisel3._
 import chisel3.util._
 import beethoven._
-import org.chipsalliance.cde.config._
+import chipsalliance.rocketchip.config._
 import fpwrapper.{FPFloatFormat, FPIntFormat, FPOperation, FPRoundingMode, FPU, FPUSourceType}
 import fpwrapper.impl.fpnew.FPUNewImplementation
 import prose.activations.Reciprocal
