@@ -11,6 +11,9 @@ def save_tensor(tensor, dirname, layername, layer_idx):
     global save
     if layer_idx >= layer_save_limit or not save:
         return
+    if tensor.dtype == torch.bool:
+        tensor = tensor.to(torch.float32)
+        tensor = (tensor - 1) * torch.inf
     # print("trying to save " + layername)
     
     # save file

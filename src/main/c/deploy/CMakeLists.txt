@@ -24,5 +24,8 @@ link_beethoven_to_target(prose)
 beethoven_build(decoder SOURCES basic/decoder_check.cc)
 beethoven_build(full SOURCES basic/full_check.cc)
 beethoven_build(fib SOURCES basic/fib.cc)
+beethoven_build(sanity_m SOURCES basic/sanity_check_m.cc)
+
 target_link_libraries(decoder PUBLIC prose)
 target_link_libraries(full PUBLIC prose)
+target_link_libraries(sanity_m PUBLIC prose)

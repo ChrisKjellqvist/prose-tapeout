@@ -114,7 +114,8 @@ int main() {
         default:
           throw std::runtime_error("Unexpected matrix dimensionality: " + std::to_string(pair.second.size()));
       }
-      auto matrix = load_matrix("gpt_neo/" + pair.first + ".npy", pair.second);
+      auto tensor = load_tensor("gpt_neo/" + pair.first + ".pt");
+      auto matrix = tensor.data_ptr<float>();
       auto bf16_matrix = convertFloatToBF16Vector(matrix, t_eles);
       auto prose_form = new uint16_t[t_eles];
       convertRowMajorFormatToProSERowMajor(bf16_matrix, prose_form, rows, cols,
