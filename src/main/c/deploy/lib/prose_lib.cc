@@ -30,7 +30,7 @@ remote_ptr get_from_float_file(uint64_t offset, uint64_t len) {
     throw std::runtime_error("Cannot open ../../model/gpt_neo/prose_input.raw");
   }
   auto fptr =
-      mmap(nullptr, len, PROT_READ, MAP_PRIVATE | MAP_FILE, fileno(f), offset);
+      mmap(nullptr, len, PROT_READ, MAP_SHARED | MAP_FILE, fileno(f), offset);
   remote_ptr ptr = handle.malloc(len);
   memcpy(ptr.getHostAddr(), fptr, len);
   munmap(fptr, len);

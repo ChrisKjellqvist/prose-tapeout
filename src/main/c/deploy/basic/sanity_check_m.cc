@@ -4,13 +4,13 @@
 #include <cstdio>
 #include <cstring>
 
+using namespace beethoven;
+
 int main() {
   uint16_t ZERO = 0;
   uint16_t ONE = 0x3f80;
   uint16_t CHOSEN = 0x4049; // pi
   int stripe_size = 2;
-
-  beethoven::fpga_handle_t handle;
 
   int K = 8;
   int N = 8;

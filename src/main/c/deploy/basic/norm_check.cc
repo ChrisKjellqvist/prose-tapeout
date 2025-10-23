@@ -1,5 +1,6 @@
 #include <beethoven/fpga_handle.h>
 #include <beethoven_hardware.h>
+#include <bit>
 #include <cmath>
 
 using namespace beethoven;
@@ -36,7 +37,7 @@ float *golden_ln(uint16_t *p, int l, uint16_t *gamma_beta) {
   float var = golden_var(p, l, mean);
   float *out = new float[l];
   float epsilon = 1e-5;
-  float norm = 1.0f / std::sqrtf(var + epsilon);
+  float norm = 1.0f / std::sqrt(var + epsilon);
   printf("mean: %0.2f, var: %0.2f, norm: %0.2f\n", mean, var, norm);
   for (int i = 0; i < l; ++i) {
     float beta = asfloat(gamma_beta[2*i]);

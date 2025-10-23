@@ -13,8 +13,30 @@
 using namespace beethoven;
 
 int main() {
-  prose_m_matmul(my_prose_allocations.input[0],
+#ifdef LOCAL
+  init_alloc();
+  init_rptr();
+  all_layers = AllLayers();
+#endif
+  auto input = transformer_h_0_aa_input;
+  auto temp = my_prose_allocations.selfatten_intermediates[0][0];
+  prose_m_matmul(input,
                  all_layers.layers[0].proj_wgts[0].kproj,
-                 my_prose_allocations.selfatten_intermediates[0][0], nullptr, 0,
+                 temp, nullptr, 0,
                  1, 32, 768, 768, 1, nullptr, 0, 0);
+#ifdef LOCAL
+  printf("output:\n");
+  for (int i = 0; i < 32; ++i) {
+    printf("%04x ", ((uint16_t*)(temp.getHostAddr()))[i]);
+  }
+  printf("\ninput:\n");
+  for (int i = 0; i < 32; ++i) {
+    printf("%04x ", ((uint16_t*)(input.getHostAddr()))[i]);
+  }
+  printf("\nweights:\n");
+  for (int i = 0; i < 32; ++i) {
+    printf("%04x ", ((uint16_t*)(all_layers.layers[0].proj_wgts[0].kproj.getHostAddr()))[i]);
+  }
+  printf("\n");
+#endif
 }
