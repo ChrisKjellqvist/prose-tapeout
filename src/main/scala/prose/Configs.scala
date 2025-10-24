@@ -12,7 +12,7 @@ import prose.toplevel.{EType, GType, MType}
 import tsmc._
 import beethoven.BuildMode.Synthesis
 import beethoven.BuildMode.Simulation
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 
 object SpecialFunction extends Enumeration {
   val EXP, GELU = Value

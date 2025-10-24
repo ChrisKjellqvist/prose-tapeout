@@ -1,7 +1,7 @@
 package prose.systolic_array
 
 import beethoven._
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
 import beethoven.common._

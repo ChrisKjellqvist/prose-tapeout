@@ -1,6 +1,6 @@
 package prose.toplevel
 
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 
 class MType()(kMax: Int,
               Nmin: Int,

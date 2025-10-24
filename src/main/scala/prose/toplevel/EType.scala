@@ -1,7 +1,7 @@
 package prose.toplevel
 
 import beethoven.common.Misc
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import beethoven.MemoryStreams._
 
 import chisel3.util._
