@@ -16,7 +16,6 @@
 #include "uart_stdout.h"
 #endif
 using namespace beethoven;
-#ifdef USE_PROSE
 fpga_handle_t handle;
 
 #include <prose_impl.h>
@@ -256,8 +255,3 @@ int main() {
 #endif
 }
 
-#else
-int main() {
-  printf("PROSE not enabled\n");
-}
-#endif
