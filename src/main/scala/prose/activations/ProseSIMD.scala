@@ -2,7 +2,6 @@ package prose.activations
 
 import beethoven._
 import chisel3._
-import chisel3.stage.ChiselStage
 import chisel3.util.Cat
 import beethoven.Platforms._
 import beethoven.common._
@@ -167,7 +166,7 @@ class ProseSIMD(vectorDepth: Int,
 
 
 object BuildSIMDALU extends App {
-  (new ChiselStage).emitVerilog(new ProseSIMD(8, 2, true, 16, None)(Parameters.empty.alterPartial {
+  emitVerilog(new ProseSIMD(8, 2, true, 16, None)(Parameters.empty.alterPartial {
     case BuildModeKey => BuildMode.Synthesis
   }))
 }
