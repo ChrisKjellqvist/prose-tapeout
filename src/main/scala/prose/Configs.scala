@@ -330,6 +330,16 @@ object f2tapeoutconfig
       })
     )
 
+object tapeout_easysim
+    extends BeethovenBuild(
+      new TapeoutConfig(),
+      buildMode = Simulation,
+      platform = new KriaPlatform(),
+      additional_parameter = Some({ case FPUBuildMode =>
+        FPUSourceType.NonSelfContainedSystemVerilog
+      })
+    )
+
 object tapeout
     extends BeethovenBuild(
       new TapeoutConfig(),
