@@ -13,6 +13,8 @@
 #ifdef PROSE
 using namespace beethoven;
 
+fpga_handle_t handle;
+
 std::random_device rd;
 std::uniform_real_distribution<float> dist(-2, 2);
 std::default_random_engine eng(rd());

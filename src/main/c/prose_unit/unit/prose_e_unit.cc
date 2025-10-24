@@ -22,6 +22,7 @@
 #ifdef PROSE
 using namespace beethoven;
 
+fpga_handle_t handle;
 //#include "prose_ops.h"
 
 #ifndef BAREMETAL
