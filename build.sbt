@@ -15,7 +15,7 @@ lazy val prose = {
         "org.chipsalliance" %% "chisel" % chiselVersion,
         "edu.duke.cs.apex" %% "fpnew-wrapper" % "0.3.0",
         "edu.duke.cs.apex" %% "beethoven-hardware" % "0.1.3-dev5",
-        "edu.duke.cs.apex" %% "asic_lib" % "0.0.0",
+        "edu.duke.cs.apex" %% "asic_lib" % "0.1.0",
       ),
       resolvers += ("reposilite-repository-releases" at "http://54.165.244.214:8080/releases").withAllowInsecureProtocol(true),
       addCompilerPlugin("org.chipsalliance" % "chisel-plugin" % chiselVersion cross CrossVersion.full)
