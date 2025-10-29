@@ -363,3 +363,4 @@ layer_dict.txt
 *pt
 src/main/c/model/gpt_neo/*
 convert_gptneo
+SRs/

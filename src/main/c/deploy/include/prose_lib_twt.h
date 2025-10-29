@@ -3,6 +3,7 @@
 
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
 #include <beethoven_hardware.h>
+#include <coroutine>
 
 //
 // Created by Christopher Kjellqvist on 9/30/24.
