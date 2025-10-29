@@ -8,6 +8,7 @@
 #include "beethoven_hardware.h"
 #include "prose_rptr.h"
 #include "prose_vec_rptr.h"
+#include "prose_lib_twt.h"
 #include <coroutine>
 using namespace beethoven;
 
@@ -100,17 +101,13 @@ struct dec_dep {
 
 
 
-struct prose_thread : std::coroutine_handle<promise>
-{
-    using promise_type = ::promise;
-    bool done() const {
-        return this->promise().task_done;
-    }
-    void resume() {
-        // assume caller ensures !done() and handle is valid
-        std::coroutine_handle<promise>::resume();
-    }
-};
+bool prose_thread::done() const noexcept {
+    return this->promise().task_done;
+}
+
+void prose_thread::resume() noexcept {
+    std::coroutine_handle<promise>::resume();
+}
  
 struct promise
 {

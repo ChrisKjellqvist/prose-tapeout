@@ -39,6 +39,16 @@ private:
         n_layers(n_layers), norm_type(norm_type), seq_len(seq_len) {}
 };
 
+struct promise;
+
+struct prose_thread : std::coroutine_handle<promise>
+{
+    using promise_type = ::promise;
+
+    bool done() const noexcept;
+    void resume() noexcept;
+};
+
 struct ProjLayer {
   beethoven::remote_ptr kproj;
   beethoven::remote_ptr vproj;
