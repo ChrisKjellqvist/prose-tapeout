@@ -19,6 +19,7 @@ struct prose_allocations {
   beethoven::remote_ptr ln_out[n_threads];
   beethoven::remote_ptr selfatten_intermediates[n_threads][4];
   beethoven::remote_ptr selfatten_attenscore[n_threads];
+  beethoven::remote_ptr output_accumulator[n_threads];
   beethoven::remote_ptr mlp_intermediate[n_threads];
   beethoven::remote_ptr output[n_threads];
   constexpr prose_allocations() {};
@@ -28,10 +29,13 @@ struct prose_allocations {
       const beethoven::remote_ptr (&selfatten_intermediates)[n_threads][4],
       const beethoven::remote_ptr (&ln_out)[n_threads],
       const beethoven::remote_ptr (&mlp_intermediate)[n_threads],
-      const beethoven::remote_ptr (&attenmatrix)[n_threads]) {
+      const beethoven::remote_ptr (&attenmatrix)[n_threads],
+      const beethoven::remote_ptr (&accumulators)[n_threads]
+    ) {
     for (int i = 0; i < n_threads; ++i) {
       this->output[i] = output[i];
       this->input[i] = input[i];
+      this->output_accumulator[i] = accumulators[i];
       for (int j = 0; j < 4; ++j) {
         this->selfatten_intermediates[i][j] = selfatten_intermediates[i][j];
       }
@@ -69,6 +73,7 @@ constexpr
   beethoven::remote_ptr input[n_threads];
   beethoven::remote_ptr output[n_threads];
   beethoven::remote_ptr ln_out[n_threads];
+  beethoven::remote_ptr output_accumulator[n_threads];
   beethoven::remote_ptr selfatten_intermediates[n_threads][4];
   beethoven::remote_ptr mlp_intermediate[n_threads];
   beethoven::remote_ptr attenscore[n_threads];
@@ -81,6 +86,7 @@ constexpr
   for (auto i = 0; i < n_threads; ++i) {
     input[i] = ALLOC(batch_size * dim * context_length * 2);
     output[i] = ALLOC(batch_size * dim * context_length * 2);
+    output_accumulator[i] = ALLOC(batch_size * dim * context_length * 2);
     ln_out[i] = ALLOC(batch_size * dim * context_length * 2);
     mlp_intermediate[i] = ALLOC(batch_size * dim * 4 * context_length * 2);
     selfatten_intermediates[i][0] = ALLOC(batch_size * head_size * context_length * 2);
@@ -92,7 +98,7 @@ constexpr
 
   assert(allocator < 32 * 1024 * 1024);
   return prose_allocations<n_threads, dim, batch_size, context_length, n_heads>(
-      input, output, selfatten_intermediates, ln_out, mlp_intermediate, attenscore);
+      input, output, selfatten_intermediates, ln_out, mlp_intermediate, attenscore, output_accumulator);
 }
 } // namespace auto_alloc
 

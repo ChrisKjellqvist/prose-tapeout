@@ -19,6 +19,7 @@ using namespace beethoven;
 extern fpga_handle_t handle;
 
 #ifdef LOCAL
+float as_float(const uint16_t &a);
 #include "beethoven/rocc_cmd.h"
 // expect that there's the input file in ../../model/gpt_neo/prose_input.bin
 remote_ptr get_from_float_file(uint64_t offset, uint64_t len);
@@ -60,7 +61,7 @@ struct TransformerLayer {
   static const int n_layers = 12;
 
   ProjLayer proj_wgts[n_layers];
-  beethioven::remote_ptr ln1_wb;
+  beethoven::remote_ptr ln1_wb;
   beethoven::remote_ptr oproj_w, oproj_b;
   beethoven::remote_ptr ln2_wb;
   beethoven::remote_ptr mlp_fc_w, mlp_fc_b;

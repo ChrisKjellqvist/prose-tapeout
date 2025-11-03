@@ -15,6 +15,7 @@
 """ PyTorch GPT Neo model."""
 
 import os
+import globals
 from typing import Optional, Tuple, Union
 
 import torch
@@ -69,6 +70,7 @@ class GPTNeoSelfAttention(nn.Module):
         self.config = config
         self.layer_idx = layer_idx
         self.have_emitted_mask = False
+        self.have_emitted_test = False
 
         max_positions = config.max_position_embeddings
         bias = torch.tril(torch.ones((max_positions, max_positions), dtype=bool)).view(
@@ -131,7 +133,8 @@ class GPTNeoSelfAttention(nn.Module):
         if not self.have_emitted_mask:
             self.have_emitted_mask = True
             # extract the [0][0] element because this is always indexed _though_
-            save_tensor(causal_mask[0][0], "gpt_neo", f"transformer.h.{self.layer_idx}_attn_causal_mask", self.layer_idx)
+            causal_add_mask = torch.where(causal_mask[0][0], 0, float('-inf'))
+            save_tensor(causal_add_mask.contiguous(), "gpt_neo", f"transformer.h.{self.layer_idx}_attn_causal_mask", self.layer_idx)
         mask_value = torch.finfo(attn_weights.dtype).min
         # Need to be a tensor, otherwise we get error: `RuntimeError: expected scalar type float but found double`.
         # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
@@ -141,6 +144,10 @@ class GPTNeoSelfAttention(nn.Module):
         if attention_mask is not None:
             # Apply the attention mask
             attn_weights = attn_weights + attention_mask
+            
+        if globals.exit_early:
+            print("attn:", attn_weights[0,globals.head_of_interest,0,:10])
+            print("attn EXP:", torch.exp(attn_weights[0,globals.head_of_interest,:2,:10]))
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1)
         attn_weights = attn_weights.to(value.dtype)
@@ -150,7 +157,9 @@ class GPTNeoSelfAttention(nn.Module):
         if head_mask is not None:
             attn_weights = attn_weights * head_mask
 
-        attn_output = torch.matmul(attn_weights, value)
+        attn_output = torch.matmul(attn_weights, value).contiguous()
+        if globals.exit_early:
+            print("attn_output", attn_output[0,globals.head_of_interest,0,:10])
 
         return attn_output, attn_weights
 
@@ -166,13 +175,15 @@ class GPTNeoSelfAttention(nn.Module):
         query = self.q_proj(hidden_states)
         key = self.k_proj(hidden_states)
         value = self.v_proj(hidden_states)
-        
+
         query = self._split_heads(query, self.num_heads, self.head_dim)
         key = self._split_heads(key, self.num_heads, self.head_dim)
         value = self._split_heads(value, self.num_heads, self.head_dim)
+        if globals.exit_early:
+            print("query out", query[0,globals.head_of_interest,0,:10])
+            print("key out", key[0,globals.head_of_interest,0,:10])
+            print("value out", value[0,globals.head_of_interest,0,:10])
 
-        test_against = torch.matmul(hidden_states, self.q_proj.weight.T[:,0:64])
-        # print(query[0,0,0,0], test_against[0,0,0])
 
         if layer_past is not None:
             past_key = layer_past[0]
@@ -188,8 +199,17 @@ class GPTNeoSelfAttention(nn.Module):
         attn_output, attn_weights = self._attn(query, key, value, attention_mask, head_mask)
         q = attn_output.shape
         attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
+        if globals.exit_early:
+            print("out_proj_pre0-10:", attn_output[0][0][:10])
+            print("out_proj_pre64-74:", attn_output[0][0][64:73])
+        if not self.have_emitted_test:
+            self.have_emitted_test = True
+            save_tensor(attn_output.contiguous(), "gpt_neo", f"transformer.h.{self.layer_idx}_attn_output_test_input", self.layer_idx)
         # print(q, attn_output.shape)
         attn_output = self.out_proj(attn_output)
+        if globals.exit_early:
+            print("out_proj_r0:", attn_output[0][0][:10])
+            print("out_proj_r0:", attn_output[0][1][:10])
         attn_output = self.resid_dropout(attn_output)
 
         outputs = (attn_output, present)
@@ -241,9 +261,20 @@ class GPTNeoMLP(nn.Module):
         self.dropout = nn.Dropout(float(config.resid_dropout))
 
     def forward(self, hidden_states):
+        # if globals.exit_early:
+        #     print("mlp_in:", hidden_states[0,0,:8])
+        #     print("mlp_wgt:\n", self.c_fc.weight.T[:4,:4])
+        #     print(self.c_fc)
+        #     dcheck = torch.matmul(hidden_states, self.c_fc.weight.T) + self.c_fc.bias
+        #     print("double_check", dcheck[0,0,:8])
+
         hidden_states = self.c_fc(hidden_states)
         hidden_states = self.act(hidden_states)
+        if globals.exit_early:
+            print("c_fc:", hidden_states[0,0,:8])
         hidden_states = self.c_proj(hidden_states)
+        if globals.exit_early:
+            print("c_proj:", hidden_states[0,0,:8])
         hidden_states = self.dropout(hidden_states)
         return hidden_states
 
@@ -259,6 +290,7 @@ class GPTNeoBlock(nn.Module):
         self.attn = GPTNeoAttention(config, layer_id)
         self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
         self.mlp = GPTNeoMLP(inner_dim, config)
+        self.have_exported_mlp_input = False
 
     def forward(
             self,
@@ -271,12 +303,15 @@ class GPTNeoBlock(nn.Module):
     ):
         residual = hidden_states
         if self.exec_number == 0:
-            print("input: ", hidden_states[0,0,0])
             save_tensor(hidden_states, "gpt_neo", f"transformer.h.{self.layer_id}_aa_input", self.layer_id)
         
+        if globals.exit_early:
+            print("PRE LN: ", hidden_states[0,0,:10])
+            print("weight:", self.ln_1.weight[:10])
+            print("bias:", self.ln_1.bias[:10])
         hidden_states = self.ln_1(hidden_states)
-        if self.exec_number == 0:
-            print("ln1: ", hidden_states[0,0,0])
+        if globals.exit_early:
+            print("POST LN: ", hidden_states[0,0,:10])
         attn_outputs = self.attn(
             hidden_states,
             layer_past=layer_past,
@@ -289,23 +324,28 @@ class GPTNeoBlock(nn.Module):
         outputs = attn_outputs[1:]
         # residual connection
         hidden_states = attn_output + residual
-        if self.exec_number == 0:
+        if globals.exit_early:
             print("atn: ", hidden_states[0,0,0])
 
         residual = hidden_states
         hidden_states = self.ln_2(hidden_states)
-        if self.exec_number == 0:
-            print("ln2: ", hidden_states[0,0,0])
+        if not self.have_exported_mlp_input:
+            print("mlp tensor shape:", hidden_states.shape)
+            save_tensor(hidden_states, "gpt_neo", f"transformer.h.{self.layer_id}_mlp_input", self.layer_id)
+            self.have_exported_mlp_input = True
+            
+        if globals.exit_early:
+            print("ln2: ", hidden_states[0,0,:8])
 
         feed_forward_hidden_states = self.mlp(hidden_states)
-        if self.exec_number == 0:
-            print("mlp: ", hidden_states[0,0,0])
+        if globals.exit_early:
+            print("mlp: ", feed_forward_hidden_states[0,:2,:8])
 
         # residual connection
         hidden_states = residual + feed_forward_hidden_states
-        if self.exec_number == 0:
-            print("out: ", hidden_states[0,0,0])
-            print()
+        if globals.exit_early:
+            print("out: ", hidden_states[0,:2,:8])
+            exit(0)
             
         if use_cache:
             outputs = (hidden_states,) + outputs

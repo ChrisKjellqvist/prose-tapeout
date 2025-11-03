@@ -18,14 +18,8 @@ int main() {
   init_rptr();
   all_layers = AllLayers();
 #endif
-
-  prose_decoder(my_prose_allocations.input[t_id],
+  auto &input = transformer_h_0_aa_input;
+  prose_decoder(input,
                 my_prose_allocations.output[t_id],
                 ModelConfig::GPTNeoConfig(1, 8), t_id, 0);
-#ifdef LOCAL
-  for (int i = 0; i < 10; ++i) {
-    printf("%04x ",
-           ((uint16_t *)my_prose_allocations.output[t_id].getHostAddr())[i]);
-  }
-#endif
 }

@@ -19,12 +19,15 @@ def save_tensor(tensor, dirname, layername, layer_idx):
     # save file
     fname = f"{dirname}/{layername}.pt"
     if len(tensor.shape) == 2:
-        torch.save(tensor.T, fname)
+        print(layername, len(tensor.T.shape), tensor.T.shape)
+        torch.save(tensor.T.contiguous(), fname)
+        layer_dict[layername] = tensor.T.shape
     else:
-        torch.save(tensor, fname)
-    
+        print(layername, len(tensor.shape), tensor.shape)
+        torch.save(tensor.contiguous(), fname)
+        layer_dict[layername] = tensor.shape
+
     # store the names of the layers and their dimensions in a separate text file
-    layer_dict[layername] = tensor.shape
     
     # update counter for total file size
     global total_tensor_size_bytes
@@ -40,7 +43,7 @@ def save_tensor_spl(tensor, heads, head_size, dirname, layername, layer_idx):
     # save file
     for i in range(heads):
         fname = f"{dirname}/{layername}.h{i}.pt"
-        stripe = tensor.T[:,i*head_size:(i+1)*head_size]
+        stripe = tensor.T[:,i*head_size:(i+1)*head_size].contiguous()
         torch.save(stripe, fname)
         layer_dict[f"{layername}.h{i}"] = stripe.shape
         

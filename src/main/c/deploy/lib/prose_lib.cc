@@ -8,8 +8,6 @@
 #else
 #include "beethoven_baremetal/fpga_handle.h"
 #endif
-#include "beethoven/rocc_cmd.h"
-#endif
 #include "beethoven_hardware.h"
 #include "prose_rptr.h"
 #include "prose_vec_rptr.h"
@@ -25,6 +23,9 @@ const constinit prose_allocations<1, 768, 1, 16, 12> my_prose_allocations =
 #else
 #include <sys/mman.h>
 #include <unistd.h>
+float as_float(const uint16_t &a) {
+  return std::bit_cast<float>(((uint32_t)a) << 16);
+}
 remote_ptr get_from_float_file(uint64_t offset, uint64_t len) {
   FILE *f = fopen("../../model/gpt_neo/prose_input.raw", "r");
   if (f == nullptr) {
@@ -86,6 +87,7 @@ void prose_e_matmul(remote_ptr const &activations, remote_ptr const &weights,
     bias_addr_incr = bias_sz_bytes * (PROSE_ECore_N / PROSE_Nmin);
   }
   int row_execs_to_do = M / PROSE_ECore_N;
+  if (row_execs_to_do == 0) row_execs_to_do = 1;
   int cols_mo = N / PROSE_ECore_N - 1;
   auto act_acc = activations;
   auto out_acc = out;
@@ -148,6 +150,8 @@ void prose_m_matmul(const remote_ptr &activations, const remote_ptr &weights,
   }
 
   int rows_to_do = M / PROSE_MCore_N;
+  if (rows_to_do == 0)
+    rows_to_do = 1;
   int cols_mo = N / PROSE_MCore_N - 1;
   auto act_acc = activations;
   auto out_acc = out;
@@ -164,6 +168,55 @@ void prose_m_matmul(const remote_ptr &activations, const remote_ptr &weights,
                   output_transpose, weights_are_batched)
       .get();
 }
+
+// static void strided_prose_m_mhatten_output_matmul(
+//     const remote_ptr &activations,
+//     const remote_ptr &output_proj_wgt,
+//     const remote_ptr &output_proj_bias,
+//     const remote_ptr &out,
+//     int chosen_batch_size, int M, int K, int N) {
+//   const auto activation_stripe_size_bytes = K * PROSE_Nmin * 2 *
+//   chosen_batch_size; auto output_substripe_sz_bytes = PROSE_Nmin * N * 2 *
+//   chosen_batch_size; auto output_row_increment = 2 * chosen_batch_size *
+//   PROSE_MCore_N *
+//                               (output_transpose ? N : PROSE_Nmin);
+//   /**  tiled matrix multiply **/
+//   // row tiles in output matrix
+//   bool use_norms = norms != nullptr;
+//   int bias_addr_incr, bias_sz_bytes;
+//   if (biasMode == PROSE_biasNONE) {
+//   } else if (biasMode == PROSE_biasCOLS) {
+//     bias_sz_bytes = N * 2;
+//     bias_addr_incr = 0;
+//   } else if (biasMode == PROSE_biasMATRIX) {
+//     bias_sz_bytes = PROSE_Nmin * N * 2;
+//     bias_addr_incr = bias_sz_bytes * (PROSE_MCore_N / PROSE_Nmin);
+//   } else if (biasMode == PROSE_biasBATCHEDMATRIX) {
+//     bias_sz_bytes = PROSE_Nmin * N * chosen_batch_size * 2;
+//     bias_addr_incr = bias_sz_bytes * (PROSE_MCore_N / PROSE_Nmin);
+//   }
+
+//   int rows_to_do = M / PROSE_MCore_N;
+//   if (rows_to_do == 0)
+//     rows_to_do = 1;
+//   printf("ROWS_TO_DO_MO: %d\n", rows_to_do - 1);
+//   int cols_mo = N / PROSE_MCore_N - 1;
+//   auto act_acc = activations;
+//   auto out_acc = out;
+//   remote_ptr norm_acc;
+//   remote_ptr bias_acc;
+//   if (use_norms)
+//     norm_acc = *norms;
+//   if (biasMode != PROSE_biasNONE)
+//     bias_acc = *bias;
+
+//   MCore::matrixOp(0, act_acc, weights, out_acc, chosen_batch_size, bias_acc,
+//                   biasMode, bias_sz_bytes, K, cols_mo, rows_to_do - 1,
+//                   norm_acc, use_norms, norm_per_batch,
+//                   output_substripe_sz_bytes, output_transpose,
+//                   weights_are_batched)
+//       .get();
+// }
 
 void prose_g_matmul(remote_ptr const &activations, remote_ptr const &weights,
                     remote_ptr const *norms, remote_ptr const *bias,
@@ -192,6 +245,7 @@ void prose_g_matmul(remote_ptr const &activations, remote_ptr const &weights,
   }
 
   int row_execs_to_do = M / PROSE_GCore_N;
+  if (row_execs_to_do == 0) row_execs_to_do = 1;
   int cols_mo = N / PROSE_GCore_N - 1;
 
   auto act_acc = activations;
@@ -203,12 +257,10 @@ void prose_g_matmul(remote_ptr const &activations, remote_ptr const &weights,
   if (biasMode != PROSE_biasNONE)
     bias_acc = *bias;
 
-  auto handle =GCore::matrixOp(0, act_acc, weights, out_acc, chosen_batch_size, bias_acc,
-                  biasMode, bias_sz_bytes, K, cols_mo, row_execs_to_do - 1,
-                  norm_acc, use_norms, norm_per_batch,
-                  output_substripe_sz_bytes, true, false);
-  
-  while (handle.try_get())
+  auto handle = GCore::matrixOp(
+      0, act_acc, weights, out_acc, chosen_batch_size, bias_acc, biasMode,
+      bias_sz_bytes, K, cols_mo, row_execs_to_do - 1, norm_acc, use_norms,
+      norm_per_batch, output_substripe_sz_bytes, true, false).get();
 }
 
 void prose_layer_norm(const beethoven::remote_ptr &input,
@@ -234,48 +286,51 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
                              const ModelConfig &config, int t_id,
                              int layer_id) {
 #ifdef LOCAL
-    printf("i\n");
-    for (int i = 0; i < 10; ++i) {
-      printf("%04x ", ((uint16_t *)input.getHostAddr())[i]);
-    }
-    printf("\n");
+  printf("input\n");
+  for (int i = 0; i < 10; ++i) {
+    printf("%0.2f ", as_float(((uint16_t *)input.getHostAddr())[i]));
+  }
+  printf("\n");
 #endif
 
   const remote_ptr(&temps)[4] =
       my_prose_allocations.selfatten_intermediates[t_id];
   auto &attention_score_matrix_temp =
       my_prose_allocations.selfatten_attenscore[t_id];
+  memset(attention_score_matrix_temp.getHostAddr(), 0, 2 * 768 * 8);
+  auto &head_accumulate = my_prose_allocations.output_accumulator[t_id];
   const TransformerLayer &layer = all_layers.layers[layer_id];
   for (int head_idx = 0; head_idx < config.n_heads; ++head_idx) {
+    auto &query = temps[0];
     // QUERY PROJECTION
-    prose_m_matmul(input, layer.proj_wgts[head_idx].qproj, temps[0], nullptr,
+    prose_m_matmul(input, layer.proj_wgts[head_idx].qproj, query, nullptr,
                    PROSE_biasNONE, config.batch_size, config.seq_len, config.D,
                    config.head_size, true, nullptr, false, false);
 #ifdef LOCAL
     printf("qproj h%d\n", head_idx);
     for (int i = 0; i < 10; ++i) {
-      printf("%04x ", ((uint16_t *)temps[0].getHostAddr())[i]);
+      printf("%0.2f ", as_float(((uint16_t *)temps[0].getHostAddr())[i]));
     }
     printf("\n");
 #endif
-
+    auto &key = temps[1];
     // KEY PROJECTION
-    prose_m_matmul(input, layer.proj_wgts[head_idx].kproj, temps[1], nullptr,
+    prose_m_matmul(input, layer.proj_wgts[head_idx].kproj, key, nullptr,
                    PROSE_biasNONE, config.batch_size, config.seq_len, config.D,
                    config.head_size,
-                   false /* DOUBLE CHECK: Use non-transpose output here*/,
+                   true /* DOUBLE CHECK: Use non-transpose output here*/,
                    nullptr, false, false);
 #ifdef LOCAL
     printf("kproj h%d\n", head_idx);
     for (int i = 0; i < 10; ++i) {
-      printf("%04x ", ((uint16_t *)temps[1].getHostAddr())[i]);
+      printf("%0.2f ", as_float(((uint16_t *)temps[1].getHostAddr())[i]));
     }
     printf("\n");
 #endif
 
     // SOFTMAX(QUERY X KEY^T)
     prose_e_matmul(
-        temps[0], temps[1], attention_score_matrix_temp,
+        query, key, attention_score_matrix_temp,
         &all_layers.layers[layer_id].causal_mask,
         nullptr /* DOUBLE CHECK: GPTNeo doesn't use scaled attention*/,
         PROSE_biasMATRIX, config.batch_size, true, config.seq_len,
@@ -283,17 +338,18 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
 #ifdef LOCAL
     printf("e h%d\n", head_idx);
     for (int i = 0; i < 10; ++i) {
-      printf("%04x ",
-             ((uint16_t *)attention_score_matrix_temp.getHostAddr())[i]);
+      printf(
+          "%0.2f ",
+          as_float(((uint16_t *)attention_score_matrix_temp.getHostAddr())[i]));
     }
     printf("\n");
 #endif
-
+    auto &value = temps[2];
     // VALUE PROJECTION
     prose_m_matmul(input, layer.proj_wgts[head_idx].vproj, temps[2], nullptr,
                    PROSE_biasNONE, config.batch_size, config.seq_len, config.D,
                    config.head_size,
-                   true, // transpose (yes) - same reason as previous NOTE
+                   false, // SHOULD BE FALSE - this is verified, don't change
                    nullptr,
                    false, // weights are batched (no)
                    false  // norm-per-batch (no)
@@ -301,14 +357,16 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
 #ifdef LOCAL
     printf("vproj h%d\n", head_idx);
     for (int i = 0; i < 10; ++i) {
-      printf("%04x ", ((uint16_t *)temps[2].getHostAddr())[i]);
+      printf("%0.2f ", as_float(((uint16_t *)value.getHostAddr())[i]));
     }
     printf("\n");
 #endif
 
     // ATTENTION OUTPUT
-    prose_m_matmul(attention_score_matrix_temp, temps[2], temps[1], nullptr,
-                   PROSE_biasNONE, config.batch_size, config.seq_len,
+    prose_m_matmul(attention_score_matrix_temp, value,
+                   head_accumulate + head_idx * config.head_size *
+                                         config.batch_size * 2 * PROSE_Nmin,
+                   nullptr, PROSE_biasNONE, config.batch_size, config.seq_len,
                    config.seq_len, config.head_size, true, &temps[3],
                    true, // normalize per batch with softmax norm factors
                    true, // weights are batched
@@ -318,45 +376,75 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
 #ifdef LOCAL
     printf("score h%d\n", head_idx);
     for (int i = 0; i < 10; ++i) {
-      printf("%04x ", ((uint16_t *)temps[1].getHostAddr())[i]);
+      printf("%0.2f ",
+             as_float(((uint16_t *)(head_accumulate +
+                                    head_idx * config.head_size *
+                                        config.batch_size * 2 * PROSE_Nmin)
+                           .getHostAddr())[i]));
     }
     printf("\n");
 #endif
+  } // END OF HEAD ITERATE
+  printf("oproj 0-10\n");
+  for (int i = 0; i < 10; ++i) {
+    printf("%0.2f ", as_float(((uint16_t *)head_accumulate.getHostAddr())[i]));
   }
-  prose_m_matmul(temps[1], layer.oproj_w, out, &layer.oproj_b, PROSE_biasCOLS,
-                 config.batch_size, config.seq_len, config.head_size, config.D,
-                 true, nullptr, false, false);
+  printf("\n");
+  printf("oproj 64-74\n");
+  for (int i = 64 * 2; i < 64 * 2 + 10; ++i) {
+    printf("%0.2f ", as_float(((uint16_t *)head_accumulate.getHostAddr())[i]));
+  }
+  printf("\n");
+  prose_m_matmul(head_accumulate, layer.oproj_w, out, &layer.oproj_b,
+                 PROSE_biasCOLS, config.batch_size, config.seq_len, config.D,
+                 config.D, true, nullptr, false, false);
 #ifdef LOCAL
   printf("oproj\n");
   for (int i = 0; i < 10; ++i) {
-    printf("%04x ", ((uint16_t *)out.getHostAddr())[i]);
+    printf("%0.2f ", as_float(((uint16_t *)out.getHostAddr())[i]));
   }
   printf("\n");
 #endif
 }
 
+static constexpr uint16_t float2uint(const float &q) {
+  return uint16_t(std::bit_cast<uint32_t>(q) >> 16);
+}
+
+static const uint16_t one_over_D = float2uint(1.F / 768);
+
 void prose_decoder(const remote_ptr &input, const remote_ptr &out,
                    const ModelConfig &config, int t_id, int layer_id) {
   const auto &residual = input;
 #ifdef VERBOSE
-  {
-    uint32_t f_i = *(uint16_t *)input.getHostAddr();
-    f_i <<= 16;
-    float f = std::bit_cast<float>(f_i);
-    printf("input: %0.4f\n", f);
+  printf("decoder input:\n");
+  for (int i = 0; i < 10; ++i) {
+    printf("%0.2f ", as_float(((uint16_t *)input.getHostAddr())[i]));
   }
+  printf("\ndecoder wb:\n");
+  for (int i = 0; i < 10; ++i) {
+    printf(
+        "%0.2f ",
+        as_float(
+            ((uint16_t *)all_layers.layers[layer_id].ln1_wb.getHostAddr())[i]));
+  }
+
+  printf("\n");
 #endif
-  Norm::norm(0, all_layers.layers[layer_id].ln1_wb, input, 1, config.batch_size,
-             1.0 / 768, flagLayerNorm, my_prose_allocations.ln_out[t_id], 1,
+  Norm::norm(0, all_layers.layers[layer_id].ln1_wb, input,
+             config.batch_size * PROSE_Nmin, config.seq_len / PROSE_Nmin,
+             one_over_D, flagLayerNorm, my_prose_allocations.ln_out[t_id], true,
              config.D)
       .get();
 #ifdef VERBOSE
-  {
-    uint32_t f_i = *(uint16_t *)input.getHostAddr();
-    f_i <<= 16;
-    float f = std::bit_cast<float>(f_i);
-    printf("ln1: %0.4f\n", f);
+  printf("post layernorm:\n");
+  for (int i = 0; i < 10; ++i) {
+    printf(
+        "%0.4f ",
+        as_float(
+            ((uint16_t *)my_prose_allocations.ln_out[t_id].getHostAddr())[i]));
   }
+  printf("\n");
 #endif
 
   prose_mh_self_attention(my_prose_allocations.ln_out[t_id], out, config, t_id,
@@ -364,28 +452,26 @@ void prose_decoder(const remote_ptr &input, const remote_ptr &out,
   MatrixAdd::MatAdd(0, residual, out, residual,
                     config.D * config.batch_size * config.seq_len)
       .get();
-#ifdef VERBOSE
-  {
-    uint32_t f_i = *(uint16_t *)input.getHostAddr();
-    f_i <<= 16;
-    float f = std::bit_cast<float>(f_i);
-    printf("atn: %0.4f\n", f);
+#ifdef LOCAL
+  printf("residual\n");
+  for (int i = 0; i < 10; ++i) {
+    printf("%0.4f ", as_float(((uint16_t *)residual.getHostAddr())[i]));
   }
+  printf("\n");
 #endif
 
-  Norm::norm(0, all_layers.layers[layer_id].ln2_wb, residual, 1,
-             config.batch_size, 1.0 / 768, flagLayerNorm,
-             my_prose_allocations.ln_out[t_id], 1, config.D)
+  Norm::norm(0, all_layers.layers[layer_id].ln2_wb, residual,
+             config.batch_size * PROSE_Nmin, config.seq_len / PROSE_Nmin,
+             one_over_D, flagLayerNorm, my_prose_allocations.ln_out[t_id], true,
+             config.D)
       .get();
-#ifdef VERBOSE
-  {
-    uint32_t f_i = *(uint16_t *)input.getHostAddr();
-    f_i <<= 16;
-    float f = std::bit_cast<float>(f_i);
-    printf("ln2: %0.4f\n", f);
+#ifdef LOCAL
+  printf("post-norm2\n");
+  for (int i = 0; i < 10; ++i) {
+    printf("%0.4f ", as_float(((uint16_t *)my_prose_allocations.ln_out[t_id].getHostAddr())[i]));
   }
+  printf("\n");
 #endif
-
   // START MLP
   prose_g_matmul(my_prose_allocations.ln_out[t_id],
                  all_layers.layers[layer_id].mlp_fc_w, nullptr,
@@ -396,28 +482,26 @@ void prose_decoder(const remote_ptr &input, const remote_ptr &out,
   prose_m_matmul(my_prose_allocations.mlp_intermediate[t_id],
                  all_layers.layers[layer_id].mlp_proj_w,
                  my_prose_allocations.ln_out[t_id],
-                 &all_layers.layers[layer_id].mlp_proj_w, PROSE_biasCOLS,
+                 &all_layers.layers[layer_id].mlp_proj_b, PROSE_biasCOLS,
                  config.batch_size, config.seq_len, config.D * 4, config.D,
                  true, nullptr, false, false);
 // END MLP
-#ifdef VERBOSE
-  {
-    uint32_t f_i = *(uint16_t *)input.getHostAddr();
-    f_i <<= 16;
-    float f = std::bit_cast<float>(f_i);
-    printf("mlp: %0.4f\n", f);
+#ifdef LOCAL
+  printf("post-mlp\n");
+  for (int i = 0; i < 10; ++i) {
+    printf("%0.4f ", as_float(((uint16_t *)my_prose_allocations.ln_out[t_id].getHostAddr())[i]));
   }
+  printf("\n");
 #endif
 
   MatrixAdd::MatAdd(0, residual, my_prose_allocations.ln_out[t_id], out,
                     config.D * config.batch_size * config.seq_len)
       .get();
-#ifdef VERBOSE
-  {
-    uint32_t f_i = *(uint16_t *)input.getHostAddr();
-    f_i <<= 16;
-    float f = std::bit_cast<float>(f_i);
-    printf("out: %0.4f\n", f);
+#ifdef LOCAL
+  printf("post-decoder\n");
+  for (int i = 0; i < 10; ++i) {
+    printf("%0.4f ", as_float(((uint16_t *)out.getHostAddr())[i]));
   }
+  printf("\n");
 #endif
 }

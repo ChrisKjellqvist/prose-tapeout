@@ -9,9 +9,20 @@ from torch.profiler import *
 from pyutils import save_tensor, save_tensor_spl
 import pyutils
 
-do_inf = True
-do_profile = False
-save_model = True
+import sys
+import globals
+
+torch.set_printoptions(linewidth=1000)
+
+do_inf = "-inf" in sys.argv
+do_profile = "-prof" in sys.argv
+save_model = "-save" in sys.argv
+sanity = "-sanity" in sys.argv
+
+if sanity:
+    globals.exit_early = True
+
+print(f"inference: {do_inf}, profile: {do_profile}, save: {save_model}, sanity: {sanity}")
 layers_to_emit = 2
 
 if __name__ == "__main__":
@@ -33,10 +44,10 @@ if __name__ == "__main__":
     # 8 tokens
     inputSeq = ["Duke University is a place in the"]
     input_ids = tokenizer(inputSeq, return_tensors="pt").input_ids
-    print("tensor shape is ", input_ids.shape)
-    print("batch size is ", input_ids.shape[0])
-    print(model)
-    print("model parameter data type is " + str(next(model.parameters()).dtype))
+    # print("tensor shape is ", input_ids.shape)
+    # print("batch size is ", input_ids.shape[0])
+    # print(model)
+    # print("model parameter data type is " + str(next(model.parameters()).dtype))
 
     if do_inf:
         if do_profile:
@@ -70,7 +81,7 @@ if __name__ == "__main__":
     # print("Num layers: ", len(model.transformer.h))
     for i, layer in enumerate(model.transformer.h):
         layer_name = f"transformer.h.{i}"
-        ln1cat = torch.cat((layer.ln_1.weight, layer.ln_1.bias))
+        ln1cat = torch.cat((layer.ln_1.bias, layer.ln_1.weight))
         shp = ln1cat.shape[0]
         alt = ln1cat.reshape((2, (shp//2))).T
         alt = alt.reshape((shp)).contiguous()
@@ -82,7 +93,8 @@ if __name__ == "__main__":
         save_tensor_spl(layer.attn.attention.q_proj.weight, 12, 64, dirname, f"{layer_name}_attn_qproj_weight", i)
         save_tensor(layer.attn.attention.out_proj.weight, dirname, f"{layer_name}_attn_outproj_weight", i)
         save_tensor(layer.attn.attention.out_proj.bias, dirname, f"{layer_name}_attn_outproj_bias", i)
-        ln2cat = torch.cat((layer.ln_2.weight, layer.ln_2.bias))
+        ln2cat = torch.cat((layer.ln_2.bias, layer.ln_2.weight
+))
         alt = ln2cat.reshape((2, (shp//2))).T
         alt = alt.reshape((shp)).contiguous()
         save_tensor(alt, dirname, f"{layer_name}_ln_2_gb", i)

@@ -11,7 +11,7 @@ using namespace beethoven;
 
 const int N = 32;
 const int batch_size = 2;
-const int NORM_TO_TEST = flagRMSNorm;
+const int NORM_TO_TEST = flagLayerNorm;
 
 int main() {
 
@@ -111,6 +111,4 @@ int main() {
 
   printf("Max diff: %x\n", hexdiff);
   printf("Max diff: %0.4f, %0.4f\n", p1, p2);
-
-  handle.shutdown();
 }

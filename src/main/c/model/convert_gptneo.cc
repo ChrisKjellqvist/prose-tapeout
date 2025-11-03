@@ -13,7 +13,8 @@ float *load_matrix(const std::string &filename, const std::vector<int> &dims) {
   std::ifstream file(filename, std::ios::binary);
   file.seekg(128, std::ios::beg);
   int tsize = 1;
-  for (const auto &d: dims) tsize *= d;
+  for (const auto &d : dims)
+    tsize *= d;
   float *matrix = new float[tsize];
   file.read(reinterpret_cast<char *>(matrix), tsize * sizeof(float));
   file.close();
@@ -53,7 +54,11 @@ uint16_t *convertFloatToBF16Vector(const float *input, int size) {
   return output;
 }
 
-const int tile_size = 4;
+const int tile_size = 2;
+
+static bool should_be_col_encoded(const std::string &a) {
+  return a.find("input") != -1;
+}
 
 int main() {
   auto index = get_index();
@@ -92,34 +97,49 @@ int main() {
       matrices.emplace_back((uint16_t *)debug, 1024 / 2);
     } else {
       int t_eles = 1;
-      for (auto &d: pair.second) {
+      for (auto &d : pair.second) {
         t_eles *= d;
       }
       int rows, cols, batch;
-      switch(pair.second.size()) {
-        case 1:
-          batch = rows = 1;
-          cols = pair.second[0];
-          break;
-        case 2:
-          batch = 1;
-          rows = pair.second[0];
-          cols = pair.second[1];
-          break;
-        case 3:
-          batch = pair.second[0];
-          rows = pair.second[1];
-          cols = pair.second[2];
-          break;
-        default:
-          throw std::runtime_error("Unexpected matrix dimensionality: " + std::to_string(pair.second.size()));
+      switch (pair.second.size()) {
+      case 1:
+        batch = rows = 1;
+        cols = pair.second[0];
+        break;
+      case 2:
+        batch = 1;
+        rows = pair.second[0];
+        cols = pair.second[1];
+        break;
+      case 3:
+        batch = pair.second[0];
+        rows = pair.second[1];
+        cols = pair.second[2];
+        break;
+      default:
+        throw std::runtime_error("Unexpected matrix dimensionality: " +
+                                 std::to_string(pair.second.size()));
       }
       auto tensor = load_tensor("gpt_neo/" + pair.first + ".pt");
-      auto matrix = tensor.data_ptr<float>();
+      auto matrix = tensor.contiguous().data_ptr<float>();
       auto bf16_matrix = convertFloatToBF16Vector(matrix, t_eles);
       auto prose_form = new uint16_t[t_eles];
-      convertRowMajorFormatToProSERowMajor(bf16_matrix, prose_form, rows, cols,
-                                           batch, tile_size);
+      
+      if (should_be_col_encoded(pair.first)) {
+        printf("%s is col-coded\n", pair.first.c_str());
+        convertRowMajorFormatToProSEColMajor(bf16_matrix, prose_form, rows,
+                                             cols, batch, tile_size);
+      } else {
+        if (pair.first == "transformer.h.0_mlp_cfc_weight") {
+          printf("%d x %d\n", rows, cols);
+          for (int i = 0; i < 8; ++i) {
+            printf("%0.4f ", matrix[i*768*4]);
+          }
+          printf("\n");
+        }
+        convertRowMajorFormatToProSERowMajor(bf16_matrix, prose_form, rows,
+                                             cols, batch, tile_size);
+      }
       matrices.emplace_back(prose_form, t_eles);
     }
   }

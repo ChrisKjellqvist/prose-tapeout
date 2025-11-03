@@ -212,8 +212,6 @@ int main() {
   test_prose_m(1, 64, PROSE_MCore_N * NCORES_M * NCORES_M, PROSE_MCore_N * 2, false);
   MCore::setFakeIO(0, false);
   printf("\n\nshutting down peacefully. No errors found.\n");
-  handle.shutdown();
-  fflush(stdout);
 }
 
 #else
