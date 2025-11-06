@@ -1,5 +1,6 @@
 #include "prose_rptr.h"
 #include "prose_lib.h"
+
 struct AllLayers {
   TransformerLayer layers[2];
   __constructor_annot__ ~AllLayers() {}

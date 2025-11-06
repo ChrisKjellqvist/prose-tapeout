@@ -9,149 +9,38 @@
 #include "prose_rptr.h"
 #include "prose_vec_rptr.h"
 #include "prose_lib_twt.h"
+#include <cstring>
 
 using namespace beethoven;
 
-#ifndef LOCAL
-const constinit AllLayers all_layers;
-const constinit prose_allocations<1, 768, 1, 16, 12> my_prose_allocations =
-    auto_alloc::get_prose_allocs<1, 768, 1, 16, 12>();
-#else
-fpga_handle_t handle;
-#include <sys/mman.h>
-#include <unistd.h>
-remote_ptr get_from_float_file(uint64_t offset, uint64_t len) {
-  FILE *f = fopen("../../model/gpt_neo/prose_input.bin", "r");
-  if (f == nullptr) {
-    throw std::runtime_error("Cannot open ../../model/gpt_neo/prose_input.raw");
-  }
-  auto fptr = mmap(nullptr, len, PROT_READ, MAP_PRIVATE | MAP_FILE, fileno(f), offset);
-  remote_ptr ptr = handle.malloc(len);
-  memcpy(ptr.getHostAddr(), fptr, len);
-  munmap(fptr, len);
-  return ptr;
-}
-const AllLayers all_layers;
-const prose_allocations<1, 768, 1, 16, 12> my_prose_allocations =
-    auto_alloc::get_prose_allocs<1, 768, 1, 16, 12>();
-#endif
-
-enum class M_type {
-  M_Q,
-  M_K,
-  M_V,
-  M_ATTN,
-  M_FINAL,
-  M_DECODER
-};
-enum DecoderMask { norm1=0, mha=1, M1=2, norm2=3, add1=4, G=5, M2=6, add2=7 };
-enum HeadMask { LeftE=0, RightE=1, LeftM=2, RightM=3 };
-
-
-struct dec_dep {
-    static constexpr int HEADS = 12;              // works for even number of heads
-    static constexpr int BITS_PER_HEAD = 4;
-    static constexpr int TOTAL_BITS_HEADS = HEADS * BITS_PER_HEAD;
-    static constexpr int TOTAL_BYTES_HEADS = TOTAL_BITS_HEADS / 8; // exact bytes for heads
-    static constexpr int DECODER_FLAGS = 8;      // 8 flags for decoder
-    static constexpr int TOTAL_BYTES = TOTAL_BYTES_HEADS + 1; // last byte for decoder
-
-    unsigned char bits[TOTAL_BYTES] = {}; // array to store heads + decoder flags
-    unsigned char heads[HEADS] = {}; // array to store heads + decoder flags
-    unsigned short int mha_done = ~((1u << HEADS) - 1);
-
-    // HEAD flags
-    void set_head(int head, HeadMask m) {
-        int pos = head * BITS_PER_HEAD + m;
-        int byte = pos / 8;
-        int bit  = pos % 8;
-        //if (value) 
-        bits[byte] |= (1u << bit);
-        //else       bits[byte] &= ~(1u << bit);
-    }
-
-    bool get_head(int head, HeadMask m) const {
-        int pos = head * BITS_PER_HEAD + m;
-        int byte = pos / 8;
-        int bit  = pos % 8;
-        return (bits[byte] >> bit) & 1u;
-    }
-
-    // DECODER flags (stored in last byte)
-
-    void set_decoder(DecoderMask m) {
-        //if (value) 
-        bits[TOTAL_BYTES - 1] |= (1u << m);
-        //else       bits[TOTAL_BYTES - 1] &= ~(1u << m);
-    }
-
-    bool get_decoder(DecoderMask m) const {
-        return (bits[TOTAL_BYTES - 1] >> m) & 1u;
-    }
-
-    void set_head_done(int head_id) {
-        mha_done|= (1u << head_id);
-    }
-
-    bool get_heads_done() {
-        return mha_done == 0xFFFF;
-    }
-
-};
-
-
+bool decoder_scheduler::prose_state[5] = {false, false, false, false, false};
 
 bool prose_thread::done() const noexcept {
     return this->promise().task_done;
 }
 
 void prose_thread::resume() noexcept {
-    std::coroutine_handle<promise>::resume();
+    if (this->address())  // optional safety check
+        std::coroutine_handle<prose_promise>(*this).resume();
 }
- 
-struct promise
-{
-    /** G E M Norm Add , 1: running, 0: idle */
-    static bool prose_state[5];
-    bool task_done = false;
-    prose_thread get_return_object() { return {prose_thread::from_promise(*this)}; }
-    std::suspend_always initial_suspend() noexcept { return {}; }
-    std::suspend_never final_suspend() noexcept { return {}; }
-    void return_value(bool v) {task_done = v;}
-    void unhandled_exception() { task_done = false; }
-};
 
+const char *prose_thread::name() const noexcept {
+  return this->promise().name;
+}
 
-struct decoder_scheduler {
-  static constexpr int HEADS = 12; 
-  prose_thread task_queue[HEADS * 5 + 7];
-  dec_dep dependency;
+decoder_scheduler::decoder_scheduler(const remote_ptr &input, const ModelConfig &config,
+                            const remote_ptr &out, int t_id, int layer_id) {
+  set_decoder_tasks(input, config, out, t_id, layer_id);
+}
 
-  decoder_scheduler(const remote_ptr &input, const ModelConfig &config,
-                            const remote_ptr &out, int t_id, int layer_id)
-  {
-    
-    for (auto& task : task_queue) {
-        task = nullptr;
-    }
-    set_decoder_tasks(input, config, out, t_id, layer_id);
+bool decoder_scheduler::done() {
+  for (const auto& task : task_queue) {
+      if (task && !task.done()) {
+        return false; // Found a valid task that is not yet done.
+      }
   }
-
-  void set_decoder_tasks(const remote_ptr &input, const ModelConfig &config,
-                            const remote_ptr &out, int t_id, int layer_id);
-
-  bool done() {
-    for (const auto& task : task_queue) {
-        if (task && !task.done()) {
-          return false; // Found a valid task that is not yet done.
-        }
-    }
-    return true; // All valid tasks are done, or the queue is empty.
-  };
-  
-  void execute();
+  return true; // All valid tasks are done, or the queue is empty.
 };
-
 
 /**
  * @brief Perform a matrix multiplication operation on the input tensors with
@@ -170,12 +59,13 @@ struct decoder_scheduler {
  * @param write_out output tensor for the normalization values provided by
  * softmax
  */
+
 prose_thread prose_e_matmul_nb(remote_ptr const &activations, remote_ptr const &weights,
                     remote_ptr const &out, remote_ptr const *bias,
                     remote_ptr const *norms, int biasMode,
                     int chosen_batch_size, bool weights_are_batched, int M,
                     int K, int N, remote_ptr const &write_out,
-                    bool norm_per_batch, const dec_dep* dep, const int head_id) { // using message passing, go if input pointer is true, write output point to true when finishing
+                    bool norm_per_batch, dec_dep* dep, const int head_id) { // using message passing, go if input pointer is true, write output point to true when finishing
   const auto activation_stripe_size_bytes =
       K * PROSE_Nmin * 2 * chosen_batch_size;
   auto output_stripe_sz_bytes = PROSE_ECore_N * N * 2 * chosen_batch_size;
@@ -183,9 +73,10 @@ prose_thread prose_e_matmul_nb(remote_ptr const &activations, remote_ptr const &
   bool use_norms = norms != nullptr;
   bool dependency_solved = false;
   /** wait until dependancy is solved and core is free **/
-  while (promise::prose_state[1] && !dependency_solved/* input dependency unsolved */)
+  while (decoder_scheduler::prose_state[1] || !dependency_solved/* input dependency unsolved */)
   {
-    dependency_solved = dep->get_head(head_id, LeftE) && dep->get_head(head_id, RightE);
+    //std::cout << "E waiting" << decoder_scheduler::prose_state[1] << " " << !dependency_solved << std::endl;
+    dependency_solved = dep->get_head(head_id, LeftE) || dep->get_head(head_id, RightE);
     co_await std::suspend_always{};
   }
   /**  tiled matrix multiply **/
@@ -213,6 +104,9 @@ prose_thread prose_e_matmul_nb(remote_ptr const &activations, remote_ptr const &
     norm_acc = *norms;
   if (biasMode != PROSE_biasNONE)
     bias_acc = *bias;
+  //std::cout << "state[1] = " << decoder_scheduler::prose_state[1] << "this is " << reinterpret_cast<void*>(prose_e_matmul_nb) << std::endl;
+  assert(decoder_scheduler::prose_state[1] == 0);
+  decoder_scheduler::prose_state[1] = 1;
   auto handle = ECore::matrixOp(0, act_acc, weights, out_acc, chosen_batch_size, bias_acc,
                   biasMode, bias_sz_bytes, K, cols_mo, row_execs_to_do - 1,
                   norm_acc, use_norms, norm_per_batch,
@@ -223,6 +117,7 @@ prose_thread prose_e_matmul_nb(remote_ptr const &activations, remote_ptr const &
     co_await std::suspend_always();
   }
   dep->set_head(head_id, LeftM);
+  decoder_scheduler::prose_state[1] = 0;
   co_return true;
 }
 
@@ -257,8 +152,9 @@ prose_thread prose_m_matmul_nb(const remote_ptr &activations, const remote_ptr &
 
   bool dependency_solved = false;
 
-  while (promise::prose_state[2] && !dependency_solved)
+  while (decoder_scheduler::prose_state[2] || !dependency_solved)
   {
+    // std::cout << "M waiting" << decoder_scheduler::prose_state[2] << " " << !dependency_solved<< std::endl;
     switch (which_m) {
       case M_type::M_K:
         dependency_solved = dep->get_decoder(norm1);
@@ -308,6 +204,8 @@ prose_thread prose_m_matmul_nb(const remote_ptr &activations, const remote_ptr &
   if (biasMode != PROSE_biasNONE)
     bias_acc = *bias;
 
+  assert(decoder_scheduler::prose_state[2] == 0);
+  decoder_scheduler::prose_state[2] = 1;
   auto handle = MCore::matrixOp(0, act_acc, weights, out_acc, chosen_batch_size, bias_acc,
                   biasMode, bias_sz_bytes, K, cols_mo, rows_to_do - 1, norm_acc,
                   use_norms, norm_per_batch, output_substripe_sz_bytes,
@@ -331,12 +229,13 @@ prose_thread prose_m_matmul_nb(const remote_ptr &activations, const remote_ptr &
         dep->set_head_done(head_id);
         break;
       case M_type::M_FINAL:
-        dep->set_decoder(dep->get_decoder(mha));
+        dep->set_decoder(head_id);
         break;
       case M_type::M_DECODER:
         dependency_solved = dep->get_decoder(G);
         break;
   }
+  decoder_scheduler::prose_state[2] = 0;
   co_return true;
 }
 
@@ -344,6 +243,7 @@ prose_thread prose_g_matmul_nb(remote_ptr const &activations, remote_ptr const &
                     remote_ptr const *norms, remote_ptr const *bias,
                     remote_ptr const &out, int chosen_batch_size, int M, int K,
                     int N, bool norm_per_batch, int biasMode, dec_dep* dep) {
+
   const auto activation_stripe_size_bytes =
       K * PROSE_Nmin * 2 * chosen_batch_size;
   const auto weight_stripe_size_bytes = K * PROSE_Nmin * 2;
@@ -352,8 +252,10 @@ prose_thread prose_g_matmul_nb(remote_ptr const &activations, remote_ptr const &
   auto output_stripe_sz_bytes = PROSE_GCore_N * N * 2 * chosen_batch_size;
   auto output_substripe_sz_bytes = PROSE_Nmin * N * 2 * chosen_batch_size;
   bool dependency_solved = dep->get_decoder(add1);
-  while (promise::prose_state[0] && !dependency_solved)
+  std::cout << "try G" << decoder_scheduler::prose_state[0] << " " << !dependency_solved << std::endl;
+  while (decoder_scheduler::prose_state[0] || !dependency_solved)
   {
+    //std::cout << "G waiting" << decoder_scheduler::prose_state[0] << " " << !dependency_solved<< std::endl;
     dependency_solved = dep->get_decoder(add1);
     co_await std::suspend_always{};
   }
@@ -384,6 +286,8 @@ prose_thread prose_g_matmul_nb(remote_ptr const &activations, remote_ptr const &
   if (biasMode != PROSE_biasNONE)
     bias_acc = *bias;
 
+  assert(decoder_scheduler::prose_state[0] == 0);
+  decoder_scheduler::prose_state[0] = 1;
   auto handle = GCore::matrixOp(0, act_acc, weights, out_acc, chosen_batch_size, bias_acc,
                   biasMode, bias_sz_bytes, K, cols_mo, row_execs_to_do - 1,
                   norm_acc, use_norms, norm_per_batch,
@@ -393,6 +297,7 @@ prose_thread prose_g_matmul_nb(remote_ptr const &activations, remote_ptr const &
   {
     co_await std::suspend_always{};
   }
+  decoder_scheduler::prose_state[0] = 0;
   dep->set_decoder(G);
   co_return true;
 }
@@ -404,13 +309,16 @@ prose_thread prose_layer_norm_nb(const beethoven::remote_ptr &input,
                       const beethoven::remote_ptr &out, dec_dep* dep, DecoderMask which_norm) {
   if(which_norm != norm1){
     bool dependency_solved = dep->get_decoder(add1);
-    while (promise::prose_state[3] && !dependency_solved)
+    std::cout << "norm" << decoder_scheduler::prose_state[3] << " " << !dependency_solved<< std::endl;
+    while (decoder_scheduler::prose_state[3] || !dependency_solved)
     {
       dependency_solved = dep->get_decoder(add1);
       co_await std::suspend_always{};
     }
     
   }
+  assert(decoder_scheduler::prose_state[3] == 0);
+  decoder_scheduler::prose_state[3] = 1;
   float norm = 1.F / float(input_length);
   uint32_t norm_fp = reinterpret_cast<uint32_t &>(norm);
   auto handle = Norm::norm(0, gamma_beta, input, batch_size * PROSE_Nmin,
@@ -421,6 +329,7 @@ prose_thread prose_layer_norm_nb(const beethoven::remote_ptr &input,
     co_await std::suspend_always();
   }
   dep->set_decoder(which_norm);
+  decoder_scheduler::prose_state[3] = 0;
   co_return true;
 }
 
@@ -428,16 +337,21 @@ prose_thread prose_matadd_nb(const beethoven::remote_ptr &a,
                   const beethoven::remote_ptr &b,
                   const beethoven::remote_ptr &c, const uint32_t &length, dec_dep* dep, DecoderMask which_add) {
   bool dependency_solved = which_add == add1 ? dep->get_decoder(norm2) : dep->get_decoder(M2);
-  while (promise::prose_state[4] && !dependency_solved)
+  std::cout << "add " << decoder_scheduler::prose_state[4] << " " << !dependency_solved<< std::endl;
+  while (decoder_scheduler::prose_state[4] || !dependency_solved)
   {
+    
     dependency_solved = dep->get_decoder(add1);
     co_await std::suspend_always{};
   }
+  assert(decoder_scheduler::prose_state[4] == 0);
+  decoder_scheduler::prose_state[4] = 1;
   auto handle = MatrixAdd::MatAdd(0, a, b, c, length);
   while(!handle.try_get().has_value()){
     co_await std::suspend_always();
   }
   dep->set_decoder(which_add);
+  decoder_scheduler::prose_state[4] = 0;
   co_return true;
 }
 
@@ -475,7 +389,7 @@ void decoder_scheduler::set_decoder_tasks(const remote_ptr &input, const ModelCo
   const TransformerLayer &layer = all_layers.layers[layer_id];
 
   // Multi-Head Attention Loop
-  for (int head_idx = 0; head_idx < config.head_size; ++head_idx) {
+  for (int head_idx = 0; head_idx < config.n_heads; ++head_idx) {
     // QUERY PROJECTION
     task_queue[1 + 5 * head_idx] = prose_m_matmul_nb(attention_input, layer.proj_wgts[head_idx].qproj, temps[0], nullptr,
                    PROSE_biasNONE, config.batch_size, config.seq_len, config.D,
@@ -522,7 +436,7 @@ void decoder_scheduler::set_decoder_tasks(const remote_ptr &input, const ModelCo
   }
 
   // Final Output Projection of Attention Heads. The result is written to 'out'.
-  task_queue[config.head_size * 5 + 1] = prose_m_matmul_nb(temps[1], layer.oproj_w, out, &layer.oproj_b, PROSE_biasCOLS,
+  task_queue[config.n_heads * 5 + 1] = prose_m_matmul_nb(temps[1], layer.oproj_w, out, &layer.oproj_b, PROSE_biasCOLS,
                  config.batch_size, config.seq_len, config.head_size, config.D,
                  true, nullptr, false, false, M_type::M_FINAL, &this->dependency, 0);
   // --- END INLINED prose_mh_self_attention ---
@@ -532,27 +446,27 @@ void decoder_scheduler::set_decoder_tasks(const remote_ptr &input, const ModelCo
   // MatrixAdd::MatAdd(0, residual, out, residual,
   //                   config.D * config.batch_size * config.seq_len)
   //     .get();
-  task_queue[config.head_size * 5 + 2] = prose_matadd_nb(residual, out, residual, config.D * config.batch_size * config.seq_len, &this->dependency, add1);
-
+  task_queue[config.n_heads * 5 + 2] = prose_matadd_nb(residual, out, residual, config.D * config.batch_size * config.seq_len, &this->dependency, add1);
+  task_queue[config.n_heads * 5 + 2].promise().name = "prose_matadd_nb";
   // 3. Second Layer Normalization
   // The result of the first residual connection is passed to the second norm.
   // Norm::norm(0, all_layers.layers[layer_id].ln2_wb, residual, 1,
   //            config.batch_size, 1.0 / 768, flagLayerNorm,
   //            my_prose_allocations.ln_out[t_id], 1, config.D)
   //     .get();
-  task_queue[config.head_size * 5 + 3] = prose_layer_norm_nb(residual, all_layers.layers[layer_id].ln2_wb, config.batch_size,
+  task_queue[config.n_heads * 5 + 3] = prose_layer_norm_nb(residual, all_layers.layers[layer_id].ln2_wb, config.batch_size,
                    config.D, config.seq_len,
                    my_prose_allocations.ln_out[t_id], &this->dependency, norm2);
 
   // 4. MLP (Feed-Forward Network)
   // The output of the second norm is the input to the MLP.
-  task_queue[config.head_size * 5 + 4] = prose_g_matmul_nb(my_prose_allocations.ln_out[t_id],
+  task_queue[config.n_heads * 5 + 4] = prose_g_matmul_nb(my_prose_allocations.ln_out[t_id],
                  all_layers.layers[layer_id].mlp_fc_w, nullptr,
                  &all_layers.layers[layer_id].mlp_fc_b,
                  my_prose_allocations.mlp_intermediate[t_id], config.batch_size,
                  config.seq_len, config.D, config.D * 4, 0, PROSE_biasCOLS, &this->dependency);
 
-  task_queue[config.head_size * 5 + 5] = prose_m_matmul_nb(my_prose_allocations.mlp_intermediate[t_id],
+  task_queue[config.n_heads * 5 + 5] = prose_m_matmul_nb(my_prose_allocations.mlp_intermediate[t_id],
                  all_layers.layers[layer_id].mlp_proj_w,
                  my_prose_allocations.ln_out[t_id],
                  &all_layers.layers[layer_id].mlp_proj_w, PROSE_biasCOLS,
@@ -566,7 +480,7 @@ void decoder_scheduler::set_decoder_tasks(const remote_ptr &input, const ModelCo
   //                   out,
   //                   config.D * config.batch_size * config.seq_len)
   //     .get();
-  task_queue[config.head_size * 5 + 6] = prose_matadd_nb(residual, my_prose_allocations.ln_out[t_id], out, config.D * config.batch_size * config.seq_len, &this->dependency, add2);
+  task_queue[config.n_heads * 5 + 6] = prose_matadd_nb(residual, my_prose_allocations.ln_out[t_id], out, config.D * config.batch_size * config.seq_len, &this->dependency, add2);
 }
 
 

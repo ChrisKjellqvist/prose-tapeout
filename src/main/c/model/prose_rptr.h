@@ -7,6 +7,7 @@
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
 #endif
 #include "prose_lib.h"
+#include "prose_lib_twt.h"
 void init_rptr();
 __ptr_annot__ beethoven::remote_ptr DEBUG PTR_FROM_OFFSET_H(0x0L, 0x400L);
 __ptr_annot__ beethoven::remote_ptr transformer_h_0_aa_input PTR_FROM_OFFSET_H(0x1000L, 0x3000L);

@@ -1,10 +1,17 @@
-#ifndef PROSE_LIB_H
-#define PROSE_LIB_H
+#ifndef PROSE_LIB_TWT_H
+#define PROSE_LIB_TWT_H
 
+
+#ifdef LOCAL
+#include <beethoven/allocator/alloc.h>
+#include <beethoven/fpga_handle.h>
+#else
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
+#include <beethoven_baremetal/fpga_handle.h>
+#endif
 #include <beethoven_hardware.h>
 #include <coroutine>
-
+#include <prose_lib.h>
 //
 // Created by Christopher Kjellqvist on 9/30/24.
 //
@@ -12,65 +19,108 @@
 #include "beethoven/rocc_cmd.h"
 using namespace beethoven;
 
-#ifdef LOCAL
-// expect that there's the input file in ../../model/gpt_neo/prose_input.bin
-remote_ptr get_from_float_file(uint64_t offset, uint64_t len);
-#define PTR_FROM_OFFSET(off, len) (get_from_float_file(off, len))
-#define __ptr_annot__ const
-#define __constructor_annot__
-#else
-#define PTR_FROM_OFFSET(off, len) (beethoven::remote_ptr(off))
-#define __constructor_annot__ constexpr
-#define __ptr_annot__ constexpr
-#endif
 
-struct ModelConfig {
-  const int batch_size = -1, D = -1, n_heads = -1, head_size = -1,
-            n_layers = -1, norm_type = -1, seq_len = -1;
-  static constexpr ModelConfig GPTNeoConfig(int batch_size, int seq_len) {
-    return ModelConfig(batch_size, 768, 12, 64, 12, flagLayerNorm, seq_len);
-  }
-  constexpr ~ModelConfig() = default;
-  constexpr ModelConfig() = default;
 
-private:
-  constexpr ModelConfig(int batch_size, int D, int n_heads, int head_size,
-                        int n_layers, int norm_type, int seq_len)
-      : batch_size(batch_size), D(D), n_heads(n_heads), head_size(head_size),
-        n_layers(n_layers), norm_type(norm_type), seq_len(seq_len) {}
+enum class M_type {
+  M_Q,
+  M_K,
+  M_V,
+  M_ATTN,
+  M_FINAL,
+  M_DECODER
+};
+enum DecoderMask { norm1=0, mha=1, M1=2, norm2=3, add1=4, G=5, M2=6, add2=7 };
+enum HeadMask { LeftE=0, RightE=1, LeftM=2, RightM=3 };
+
+
+struct dec_dep {
+    static constexpr int HEADS = 12;              // works for even number of heads
+    static constexpr int BITS_PER_HEAD = 4;
+    static constexpr int TOTAL_BITS_HEADS = HEADS * BITS_PER_HEAD;
+    static constexpr int TOTAL_BYTES_HEADS = TOTAL_BITS_HEADS / 8; // exact bytes for heads
+    static constexpr int DECODER_FLAGS = 8;      // 8 flags for decoder
+    static constexpr int TOTAL_BYTES = TOTAL_BYTES_HEADS + 1; // last byte for decoder
+
+    unsigned char bits[TOTAL_BYTES] = {}; // array to store heads + decoder flags
+    //unsigned char heads[HEADS] = {}; // array to store heads + decoder flags
+    unsigned short int mha_done = ~((1u << HEADS) - 1);
+
+    // HEAD flags
+    void set_head(const int head, const HeadMask m) {
+        int pos = head * BITS_PER_HEAD + m;
+        int byte = pos / 8;
+        int bit  = pos % 8;
+        //if (value) 
+        bits[byte] |= (1u << bit);
+        //else       bits[byte] &= ~(1u << bit);
+    }
+
+    bool get_head(const int head, const HeadMask m) const {
+        int pos = head * BITS_PER_HEAD + m;
+        int byte = pos / 8;
+        int bit  = pos % 8;
+        return (bits[byte] >> bit) & 1u;
+    }
+
+    // DECODER flags (stored in last byte)
+
+    void set_decoder(const int head_id) {
+        //if (value) 
+        bits[TOTAL_BYTES - 1] |= (1u << head_id);
+        //else       bits[TOTAL_BYTES - 1] &= ~(1u << m);
+    }
+
+    bool get_decoder(const DecoderMask m) const {
+        return (bits[TOTAL_BYTES - 1] >> m) & 1u;
+    }
+
+    void set_head_done(const int head_id) {
+        mha_done|= (1u << head_id);
+    }
+
+    bool get_heads_done() {
+        return mha_done == 0xFFFF;
+    }
+
 };
 
-struct promise;
+struct prose_promise;
 
-struct prose_thread : std::coroutine_handle<promise>
+struct prose_thread : std::coroutine_handle<prose_promise>
 {
-    using promise_type = ::promise;
-
+    using promise_type = ::prose_promise; 
     bool done() const noexcept;
     void resume() noexcept;
+    const char* name() const noexcept;
 };
 
-struct ProjLayer {
-  beethoven::remote_ptr kproj;
-  beethoven::remote_ptr vproj;
-  beethoven::remote_ptr qproj;
-  __constructor_annot__ ProjLayer() {}
-  __constructor_annot__ ~ProjLayer() {}
+struct prose_promise
+{
+  const char* name = __func__;
+  bool task_done = false;
+  prose_thread get_return_object() { return {prose_thread::from_promise(*this)}; }
+  std::suspend_always initial_suspend() noexcept { return {}; }
+  std::suspend_never final_suspend() noexcept { return {}; }
+  void return_value(bool v) {task_done = v;}
+  void unhandled_exception() { task_done = false; }
 };
 
-struct TransformerLayer {
-  static const int n_layers = 12;
 
-  ProjLayer proj_wgts[n_layers];
-  beethoven::remote_ptr ln1_wb;
-  beethoven::remote_ptr oproj_w, oproj_b;
-  beethoven::remote_ptr ln2_wb;
-  beethoven::remote_ptr mlp_fc_w, mlp_fc_b;
-  beethoven::remote_ptr mlp_proj_w, mlp_proj_b;
-  beethoven::remote_ptr causal_mask;
-  __constructor_annot__ TransformerLayer() {}
-  __constructor_annot__ ~TransformerLayer() {}
+struct decoder_scheduler {
+    /** G E M Norm Add , 1: running, 0: idle */
+  static bool prose_state[5];
+  static constexpr int HEADS = 12; 
+  prose_thread task_queue[HEADS * 5 + 7];
+  dec_dep dependency;
+
+  decoder_scheduler(const remote_ptr &input, const ModelConfig &config,
+                            const remote_ptr &out, int t_id, int layer_id);
+  void set_decoder_tasks(const remote_ptr &input, const ModelConfig &config,
+                            const remote_ptr &out, int t_id, int layer_id);
+  bool done();
+  void execute();
 };
+
 
 /**
  * @brief Perform a matrix multiplication operation on the input tensors with
@@ -94,7 +144,7 @@ prose_thread prose_e_matmul_nb(remote_ptr const &activations, remote_ptr const &
                     remote_ptr const *norms, int biasMode,
                     int chosen_batch_size, bool weights_are_batched, int M,
                     int K, int N, remote_ptr const &write_out,
-                    bool norm_per_batch, const dec_dep* dep, const int head_id);
+                    bool norm_per_batch, dec_dep* dep, const int head_id);
 /**
  * @brief Perform a matrix multiplication operation on the input tensors with NO
  * activation We perform the operation: out = norm * (activations * weights) +
@@ -134,6 +184,8 @@ prose_thread prose_matadd_nb(const beethoven::remote_ptr &a,
                 dec_dep* dep, DecoderMask which_add);
 
 
-prose_thread prose_decoder_nb(const remote_ptr &input, const ModelConfig &config,
-                   const remote_ptr &out_accumulation, int t_id, int layer_id, dec_dep* dep, DecoderMask which_norm);
+// prose_thread prose_decoder_nb(const remote_ptr &input, const ModelConfig &config,
+//                    const remote_ptr &out_accumulation, int t_id, int layer_id, dec_dep* dep, DecoderMask which_norm);
+
+
 #endif
