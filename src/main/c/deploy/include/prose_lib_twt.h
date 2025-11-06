@@ -1,7 +1,11 @@
 #ifndef PROSE_LIB_H
 #define PROSE_LIB_H
 
+#ifdef LOCAL
+#include <beethoven/allocator/alloc.h>
+#else
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
+#endif
 #include <beethoven_hardware.h>
 #include <coroutine>
 

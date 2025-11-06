@@ -22,9 +22,11 @@ int main() {
   auto input = transformer_h_0_aa_input;
   auto wgts = all_layers.layers[0].proj_wgts[0].kproj;
   auto temp = my_prose_allocations.selfatten_intermediates[0][0];
+#ifdef LOCAL
   printf("input: %llx\n", input.getFpgaAddr());
   printf("wgt: %llx\n", wgts.getFpgaAddr()); 
   printf("out: %llx\n", temp.getFpgaAddr());
+#endif
   prose_m_matmul(input,
                  wgts,
                  temp, nullptr, 0,

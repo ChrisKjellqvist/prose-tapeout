@@ -1,4 +1,8 @@
+#ifdef LOCAL
 #include <beethoven/fpga_handle.h>
+#else
+#include <beethoven_baremetal/fpga_handle.h>
+#endif
 #include <beethoven_hardware.h>
 #include <bit>
 #include <cmath>

@@ -3,11 +3,12 @@
 
 #ifdef LOCAL
 #include <beethoven/allocator/alloc.h>
+#include <cassert>
 #else
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
 #endif
-#include <cassert>
 #include <prose_rptr.h>
+
 #ifdef LOCAL
 extern beethoven::fpga_handle_t handle;
 #endif
@@ -96,7 +97,9 @@ constexpr
     attenscore[i] = ALLOC(2 * batch_size * context_length * context_length);
   }
 
+#ifdef LOCAL
   assert(allocator < 32 * 1024 * 1024);
+#endif
   return prose_allocations<n_threads, dim, batch_size, context_length, n_heads>(
       input, output, selfatten_intermediates, ln_out, mlp_intermediate, attenscore, output_accumulator);
 }
