@@ -1,13 +1,10 @@
 #ifndef PROSE_LIB_TWT_H
 #define PROSE_LIB_TWT_H
 
-
 #ifdef LOCAL
 #include <beethoven/allocator/alloc.h>
-#include <beethoven/fpga_handle.h>
 #else
 #include <beethoven_baremetal/allocator/alloc_baremetal.h>
-#include <beethoven_baremetal/fpga_handle.h>
 #endif
 #include <beethoven_hardware.h>
 #include <coroutine>

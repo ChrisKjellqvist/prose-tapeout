@@ -17,7 +17,6 @@ using namespace beethoven;
 fpga_handle_t handle;
 
 #ifndef LOCAL
-const constinit AllLayers all_layers;
 const constinit prose_allocations<1, 768, 1, 16, 12> my_prose_allocations =
     auto_alloc::get_prose_allocs<1, 768, 1, 16, 12>();
 #else
@@ -385,6 +384,7 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
     printf("\n");
 #endif
   } // END OF HEAD ITERATE
+#ifdef LOCAL
   printf("oproj 0-10\n");
   for (int i = 0; i < 10; ++i) {
     printf("%0.2f ", as_float(((uint16_t *)head_accumulate.getHostAddr())[i]));
@@ -395,6 +395,7 @@ void prose_mh_self_attention(const remote_ptr &input, const remote_ptr &out,
     printf("%0.2f ", as_float(((uint16_t *)head_accumulate.getHostAddr())[i]));
   }
   printf("\n");
+#endif
   prose_m_matmul(head_accumulate, layer.oproj_w, out, &layer.oproj_b,
                  PROSE_biasCOLS, config.batch_size, config.seq_len, config.D,
                  config.D, true, nullptr, false, false);
@@ -416,7 +417,7 @@ static const uint16_t one_over_D = float2uint(1.F / 768);
 void prose_decoder(const remote_ptr &input, const remote_ptr &out,
                    const ModelConfig &config, int t_id, int layer_id) {
   const auto &residual = input;
-#ifdef VERBOSE
+#ifdef LOCAL
   printf("decoder input:\n");
   for (int i = 0; i < 10; ++i) {
     printf("%0.2f ", as_float(((uint16_t *)input.getHostAddr())[i]));
@@ -436,7 +437,7 @@ void prose_decoder(const remote_ptr &input, const remote_ptr &out,
              one_over_D, flagLayerNorm, my_prose_allocations.ln_out[t_id], true,
              config.D)
       .get();
-#ifdef VERBOSE
+#ifdef LOCAL
   printf("post layernorm:\n");
   for (int i = 0; i < 10; ++i) {
     printf(

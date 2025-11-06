@@ -4,9 +4,15 @@
 //
 
 #include "auto_allocate.h"
+#ifdef LOCAL
 #include "beethoven/fpga_handle.h"
 #include "beethoven/rocc_cmd.h"
+#else
+#include "beethoven_baremetal/fpga_handle.h"
+#include "beethoven_baremetal/rocc_cmd.h"
+#endif
 #include "beethoven_hardware.h"
+
 #include "prose_rptr.h"
 #include "prose_vec_rptr.h"
 #include <coroutine>
