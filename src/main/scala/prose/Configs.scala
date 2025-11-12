@@ -360,7 +360,7 @@ object tapeout
 object tapeout_n65
     extends BeethovenBuild(
       new TapeoutConfig(),
-      buildMode = BuildMode.Synthesis,
+      buildMode = BuildMode.Simulation,
       platform = new DirectTopTestChipPlatform(
         400,
         4,

@@ -115,6 +115,7 @@ class EType(stype_latency: Int)(
   val sm_norm_fifo = Module(new Queue(UInt(16.W), N * maxBatch * n_arrays, false, false, false, false))
   sm_norm_fifo.io.enq.valid := reciprocal.io.out.valid
   sm_norm_fifo.io.enq.bits := reciprocal.io.out.bits
+  reciprocal.io.out.ready := sm_norm_fifo.io.enq.ready
   sm_norm_fifo.io.deq.ready := false.B
   sm_dat.data.bits := sm_norm_fifo.io.deq.bits
 

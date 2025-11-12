@@ -52,7 +52,7 @@ abstract class BaseCore(
     specialFunc: Option[(SpecialFunction, Int)] = None
 )(implicit p: Parameters)
     extends AcceleratorCore {
-  val useFakeLUTs: Boolean = true
+  val useFakeLUTs: Boolean = false
   class MatrixOpCmd extends AccelCommand("matrixOp") {
     // ---------- WEIGHT ----------- //
     val addrIn = Address() // weight stream

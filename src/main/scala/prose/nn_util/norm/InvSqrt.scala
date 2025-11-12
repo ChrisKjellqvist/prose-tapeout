@@ -23,6 +23,7 @@ class InvSqrt()(implicit p: Parameters) extends Module {
 
   io.in <> inv.io.in
   sqr.io.req.valid := inv.io.out.valid
+  inv.io.out.ready := sqr.io.req.ready
   sqr.io.req.bits.op := FPOperation.SQRT
   sqr.io.req.bits.opModifier := 0.U
   sqr.io.req.bits.dstFormat := FPFloatFormat.Fp16Alt

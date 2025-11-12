@@ -8,25 +8,28 @@ import chisel3._
 import chisel3.util._
 import fpwrapper.FPFloatFormat
 
-
-class LayerNormCore(maxSetSize: Int,
-                    maxIntermediateSets: Int,
-                    maxNRepeats: Int,
-                    dataType: FPFloatFormat.Type,
-                    subLatency: Int = 2,
-                    fmaLatency: Int = 3,
-                    sqrtLUTLatency: Int = 1,
-                   )(implicit p: Parameters) extends AcceleratorCore {
+class LayerNormCore(
+    maxSetSize: Int,
+    maxIntermediateSets: Int,
+    maxNRepeats: Int,
+    dataType: FPFloatFormat.Type,
+    subLatency: Int = 2,
+    fmaLatency: Int = 3,
+    sqrtLUTLatency: Int = 1
+)(implicit p: Parameters)
+    extends AcceleratorCore {
   // make sure all of the necessary LUTs are generated
   locally {
     os.makeDir.all(os.pwd / "luts")
     try {
-      os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
+      os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog")
+        .call(cwd = os.pwd / "luts")
     } catch {
       case _: os.SubprocessException => // try to delete the lut directory and try again
         os.remove.all(os.pwd / "luts")
         os.makeDir.all(os.pwd / "luts")
-        os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog").call(cwd = os.pwd / "luts")
+        os.proc("cmake", os.pwd / "src" / "main" / "c" / "generate_verilog")
+          .call(cwd = os.pwd / "luts")
     }
     os.proc("make", "generate_invsqrt").call(cwd = os.pwd / "luts")
     os.proc("./generate_invsqrt", os.pwd / "luts").call(cwd = os.pwd / "luts")
@@ -34,50 +37,63 @@ class LayerNormCore(maxSetSize: Int,
 
   implicit val dataWidthBytes = dataType match {
     case fpwrapper.FPFloatFormat.Fp16Alt => 2
-    case fpwrapper.FPFloatFormat.Fp32 => 4
-    case fpwrapper.FPFloatFormat.Fp64 => 8
+    case fpwrapper.FPFloatFormat.Fp32    => 4
+    case fpwrapper.FPFloatFormat.Fp64    => 8
     case _ => throw new Exception("Unsupported data type")
   }
   val dataWidthBits = dataWidthBytes * 8
   implicit val fpuDataType = dataType match {
     case fpwrapper.FPFloatFormat.Fp16Alt => fpwrapper.FPFloatFormat.Fp32
-    case _ => dataType
+    case _                               => dataType
   }
   implicit val fpuLoadData: UInt => UInt = dataType match {
     case fpwrapper.FPFloatFormat.Fp16Alt => (x: UInt) => Cat(x, 0.U(16.W))
-    case _ => (x: UInt) => x
+    case _                               => (x: UInt) => x
   }
   implicit val fpuUnpackResult: UInt => UInt = dataType match {
     case fpwrapper.FPFloatFormat.Fp16Alt => (x: UInt) => x(31, 16)
-    case _ => (x: UInt) => x
+    case _                               => (x: UInt) => x
   }
 
   // how many variances do we need to store at once to support this stream?
-  val io = BeethovenIO(new AccelCommand("norm") {
-    // batch size of the input matrix (batch is the last dimension in input matrix)!
-    val nIntermediateSets = UInt(log2Up(maxIntermediateSets + 1).W)
-    // address of gamma_beta segment in memory
-    val gamma_beta = Address()
-    // signal to fetch new gamma_beta parameters
-    val refresh_gb = Bool()
-    // input matrix address (will be re-used multiple times)
-    val input = Address()
-    // output matrix address
-    val output = Address()
-    // When computing E[x] and Var[x], we need to divide by N. We do this by multiplying by 1/N which is provided here
-    // as a BF16 value. This means we don't need a reciprocal unit to compute the division.
-    val norm = UInt(dataWidthBits.W)
-    // max number of elements in a set. e.g., |x| for which you might compute E[x] or Var[x]
-    val setSize = UInt(log2Up(maxSetSize + 1).W)
-    // how many times to consecutively run layernorm on contiguous sets of data
-    val nRepeats = UInt(log2Up(maxNRepeats + 1).W)
-    // normType
-    val norm_ty = UInt(NormType.width.W)
-  }, EmptyAccelResponse())
+  val io = BeethovenIO(
+    new AccelCommand("norm") {
+      // batch size of the input matrix (batch is the last dimension in input matrix)!
+      val nIntermediateSets = UInt(log2Up(maxIntermediateSets + 1).W)
+      // address of gamma_beta segment in memory
+      val gamma_beta = Address()
+      // signal to fetch new gamma_beta parameters
+      val refresh_gb = Bool()
+      // input matrix address (will be re-used multiple times)
+      val input = Address()
+      // output matrix address
+      val output = Address()
+      // When computing E[x] and Var[x], we need to divide by N. We do this by multiplying by 1/N which is provided here
+      // as a BF16 value. This means we don't need a reciprocal unit to compute the division.
+      val norm = UInt(dataWidthBits.W)
+      // max number of elements in a set. e.g., |x| for which you might compute E[x] or Var[x]
+      val setSize = UInt(log2Up(maxSetSize + 1).W)
+      // how many times to consecutively run layernorm on contiguous sets of data
+      val nRepeats = UInt(log2Up(maxNRepeats + 1).W)
+      // normType
+      val norm_ty = UInt(NormType.width.W)
+    },
+    EmptyAccelResponse()
+  )
   val normTyReg = Reg(UInt(NormType.width.W))
 
-  CppGeneration.addUserCppDefinition("uint8_t", "flagLayerNorm", NormType.LayerNorm, None)
-  CppGeneration.addUserCppDefinition("uint8_t", "flagRMSNorm", NormType.RMSNorm, None)
+  CppGeneration.addUserCppDefinition(
+    "uint8_t",
+    "flagLayerNorm",
+    NormType.LayerNorm,
+    None
+  )
+  CppGeneration.addUserCppDefinition(
+    "uint8_t",
+    "flagRMSNorm",
+    NormType.RMSNorm,
+    None
+  )
 
   // stream in input set multiple times so we don't have to store it
   val meanRead = getReaderModule("mean")
@@ -94,31 +110,49 @@ class LayerNormCore(maxSetSize: Int,
     (meanRead.requestChannel, io.req.bits.input, false),
     (varRead.requestChannel, io.req.bits.input, true),
     (layerNormRead.requestChannel, io.req.bits.input, false),
-    (outputWrite.requestChannel, io.req.bits.output, false)).foreach {
-    case (reqChan, addr, maskOnRMS) =>
-      reqChan.valid := (if (maskOnRMS) io.req.bits.norm_ty === NormType.LayerNorm.U && io.req.fire else io.req.fire)
-      reqChan.bits.addr := addr
-      // shift by 1 to account for width of BF16
-      reqChan.bits.len := Cat(io.req.bits.setSize * io.req.bits.nIntermediateSets * io.req.bits.nRepeats, 0.U(1.W))
-      when(io.req.fire) {
-        if (maskOnRMS) {
-          assert(reqChan.ready || io.req.bits.norm_ty =/= NormType.LayerNorm.U)
-        } else {
-          assert(reqChan.ready)
-        }
+    (outputWrite.requestChannel, io.req.bits.output, false)
+  ).foreach { case (reqChan, addr, maskOnRMS) =>
+    reqChan.valid := (if (maskOnRMS)
+                        io.req.bits.norm_ty === NormType.LayerNorm.U && io.req.fire
+                      else io.req.fire)
+    reqChan.bits.addr := addr
+    // shift by 1 to account for width of BF16
+    reqChan.bits.len := Cat(
+      io.req.bits.setSize * io.req.bits.nIntermediateSets * io.req.bits.nRepeats,
+      0.U(1.W)
+    )
+    when(io.req.fire) {
+      if (maskOnRMS) {
+        assert(reqChan.ready || io.req.bits.norm_ty =/= NormType.LayerNorm.U)
+      } else {
+        assert(reqChan.ready)
       }
+    }
   }
 
   gammaBeta.dataChannels(0).req.valid := false.B
 
-  val tagCounterMean, tagCounterVariance, tagCounterLN, tagMax, tileRowCntr, tileMax = Reg(UInt(log2Up(maxIntermediateSets + 1).W))
-  val meanRoundCounter, varRoundCounter, LNRoundCounter, setSize = Reg(UInt(log2Up(maxSetSize + 1).W))
+  val tagCounterMean, tagCounterVariance, tagCounterLN, tagMax, tileRowCntr,
+      tileMax = RegInit(UInt(log2Up(maxIntermediateSets + 1).W), 0.U)
+  val meanRoundCounter, varRoundCounter, LNRoundCounter, setSize = Reg(
+    UInt(log2Up(maxSetSize + 1).W)
+  )
   val LNTileCounter = Reg(UInt(log2Up(maxNRepeats + 1).W))
   val norm = Reg(UInt(dataWidthBits.W))
 
-  val means = Module(new Mean(maxIntermediateSets, dataWidthBytes, fmaLatency, fpuDataType, fpuLoadData, fpuUnpackResult))
+  val means = Module(
+    new Mean(
+      maxIntermediateSets,
+      dataWidthBytes,
+      fmaLatency,
+      fpuDataType,
+      fpuLoadData,
+      fpuUnpackResult
+    )
+  )
   means.io.norm_ty := normTyReg
-  val mean_s_idle :: mean_core_start :: mean_stream :: mean_transfer :: mean_finish :: Nil = Enum(5)
+  val mean_s_idle :: mean_core_start :: mean_stream :: mean_transfer :: mean_finish :: Nil =
+    Enum(5)
   val meanState = RegInit(mean_s_idle)
   val trigger_mean_output = Reg(Bool())
   val gamma_beta_valid = RegInit(false.B)
@@ -162,32 +196,23 @@ class LayerNormCore(maxSetSize: Int,
   means.io.done := false.B
   means.io.output.ready := false.B
   meanRead.dataChannel.data.ready := means.io.input.ready && mean_can_stream
-  when(means.io.input.fire) {
-    tagCounterMean := tagCounterMean + 1.U
-    when(tagCounterMean === tagMax) {
-      tagCounterMean := 0.U
-      meanRoundCounter := meanRoundCounter + 1.U
-      when(meanRoundCounter === setSize) {
-        meanState := mean_transfer
-        meanRoundCounter := 1.U
-        trigger_mean_output := true.B
-      }
-    }
-  }
 
-  val variance = Module(new Variance(maxIntermediateSets,
-    subLatency,
-    fmaLatency,
-    sqrtLUTLatency,
-    dataWidthBytes,
-    fpuDataType,
-    fpuLoadData,
-    fpuUnpackResult))
+  val variance = Module(
+    new Variance(
+      maxIntermediateSets,
+      subLatency,
+      fmaLatency,
+      sqrtLUTLatency,
+      dataWidthBytes,
+      fpuDataType,
+      fpuLoadData,
+      fpuUnpackResult
+    )
+  )
   variance.io.begin.bits.means := means.io.output.bits
   variance.io.begin.bits.norm := norm
   variance.io.begin.valid := false.B
   variance.io.norm_ty := normTyReg
-
 
   when(io.req.fire) {
     tagCounterMean := 0.U
@@ -206,6 +231,19 @@ class LayerNormCore(maxSetSize: Int,
     when(means.io.begin.fire) {
       tileRowCntr := tileRowCntr + 1.U
       meanState := mean_stream
+    }
+  }.elsewhen(meanState === mean_stream) {
+    when(means.io.input.fire) {
+      tagCounterMean := tagCounterMean + 1.U
+      when(tagCounterMean === tagMax) {
+        tagCounterMean := 0.U
+        meanRoundCounter := meanRoundCounter + 1.U
+        when(meanRoundCounter === setSize) {
+          meanState := mean_transfer
+          meanRoundCounter := 1.U
+          trigger_mean_output := true.B
+        }
+      }
     }
   }.elsewhen(meanState === mean_finish) {
     when(outputWrite.requestChannel.ready) {
@@ -251,7 +289,16 @@ class LayerNormCore(maxSetSize: Int,
 
   variance.io.computeVariances_valid := trigger_variance_output
 
-  val layernorm = Module(new LayerNormStream(maxIntermediateSets, fmaLatency, dataWidthBytes, fpuDataType, fpuLoadData, fpuUnpackResult))
+  val layernorm = Module(
+    new LayerNormStream(
+      maxIntermediateSets,
+      fmaLatency,
+      dataWidthBytes,
+      fpuDataType,
+      fpuLoadData,
+      fpuUnpackResult
+    )
+  )
   layernorm.io.norm_ty := normTyReg
 
   layernorm.io.start_handshake.valid := variance.io.output.valid
@@ -265,17 +312,25 @@ class LayerNormCore(maxSetSize: Int,
       trigger_variance_output := false.B
     }
   }.elsewhen(variance_state === variance_s_transfer) {
-    when(variance.io.computeVariances_valid && variance.io.computeVariances_ready) {
+    when(
+      variance.io.computeVariances_valid && variance.io.computeVariances_ready
+    ) {
       trigger_variance_output := false.B
     }
     when(!trigger_variance_output && variance.io.output.fire) {
       variance_state := variance_s_idle
     }
   }
-  val gammabeta_queue = Module(new Queue(new Bundle {
-    val gamma = UInt(16.W)
-    val beta = UInt(16.W)
-  }, 2, hasFlush = true))
+  val gammabeta_queue = Module(
+    new Queue(
+      new Bundle {
+        val gamma = UInt(16.W)
+        val beta = UInt(16.W)
+      },
+      2,
+      hasFlush = true
+    )
+  )
   gammabeta_queue.io.flush.get := false.B
   val gamma_beta_idx = Reg(UInt(log2Up(maxSetSize + 1).W))
   val read_in_flight = Reg(Bool())
@@ -294,7 +349,10 @@ class LayerNormCore(maxSetSize: Int,
     read_in_flight := true.B
   }
   gammabeta_queue.io.enq.valid := gammaBeta.dataChannels(0).res.valid
-  gammabeta_queue.io.enq.bits.gamma := gammaBeta.dataChannels(0).res.bits(31, 16)
+  gammabeta_queue.io.enq.bits.gamma := gammaBeta
+    .dataChannels(0)
+    .res
+    .bits(31, 16)
   gammabeta_queue.io.enq.bits.beta := gammaBeta.dataChannels(0).res.bits(15, 0)
   when(gammaBeta.dataChannels(0).res.valid) {
     assert(gammabeta_queue.io.enq.ready)
@@ -342,9 +400,9 @@ class LayerNormCore(maxSetSize: Int,
     }
   }.elsewhen(ln_state === ln_s_transfer) {
     when(LNTileCounter === tileMax) {
-      when (outputWrite.requestChannel.ready) {
+      when(outputWrite.requestChannel.ready) {
         io.resp.valid := true.B
-        when (io.resp.fire) {
+        when(io.resp.fire) {
           ln_state := ln_s_idle
           layernorm.io.resetStream := true.B
         }
