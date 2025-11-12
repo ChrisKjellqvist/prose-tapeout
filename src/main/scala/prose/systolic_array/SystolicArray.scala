@@ -50,7 +50,7 @@ class SystolicArray(N: Int,
   io.array_idle := state === s_idle
   val outputTranpose = Reg(Bool())
   val maxloopSize = Math.max(fpuLatency, maxBatch)
-  val loopCounter = Reg(UInt(log2Up(maxloopSize + 1).W))
+  val loopCounter = RegInit(UInt(log2Up(maxloopSize + 1).W), 0.U)
   val currentBatchMO = Reg(UInt(log2Up(maxBatch).W))
 
   val kCount, cmdK = RegInit(0.U(log2Up(Math.max(kMax, N * fpuLatency)).W))

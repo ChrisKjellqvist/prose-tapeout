@@ -44,7 +44,7 @@ class ShiftRegEnableReset(width: Int,
        |reg [${width - 1}:0] mem [0:${depth - 1}];
        |
        |integer i;
-       |always @(posedge clk) begin
+       |always @(posedge clk or posedge rst) begin
        |  if (rst) begin
        |    for (i = 0; i < ${depth}; i = i + 1) begin
        |      mem[i] <= ${defaultValue};

@@ -13,6 +13,8 @@ import tsmc._
 import beethoven.BuildMode.Synthesis
 import beethoven.BuildMode.Simulation
 import org.chipsalliance.cde.config._
+import beethoven.Platforms.ASIC.memoryCompiler.MemoryCompiler
+import tsmc.n65.N65_LIB
 
 object SpecialFunction extends Enumeration {
   val EXP, GELU = Value
@@ -348,6 +350,21 @@ object tapeout
         400,
         4,
         new n16_harvard.N16_LIB(Some(Seq("ssgnp_0p72v_0p72v_m40c")))
+      ),
+      additional_parameter = Some({
+        case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog
+        case BQuiet       => true
+      })
+    )
+
+object tapeout_n65
+    extends BeethovenBuild(
+      new TapeoutConfig(),
+      buildMode = BuildMode.Synthesis,
+      platform = new DirectTopTestChipPlatform(
+        400,
+        4,
+        new N65_LIB()
       ),
       additional_parameter = Some({
         case FPUBuildMode => FPUSourceType.NonSelfContainedSystemVerilog
