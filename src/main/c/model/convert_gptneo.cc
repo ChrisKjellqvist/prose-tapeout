@@ -151,7 +151,7 @@ int main() {
   }
 
   write_to_file("gpt_neo/prose_input", matrices,
-                {std::make_pair("gpt_neo/prose_index.txt", names_only)});
+                std::make_pair("gpt_neo/prose_index.txt", names_only));
 
   // free matrices
   for (const auto &pair : matrices) {

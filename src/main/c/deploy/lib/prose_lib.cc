@@ -21,20 +21,24 @@ const constinit prose_allocations<1, 768, 1, 16, 12> my_prose_allocations =
     auto_alloc::get_prose_allocs<1, 768, 1, 16, 12>();
 #else
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 float as_float(const uint16_t &a) {
   return std::bit_cast<float>(((uint32_t)a) << 16);
 }
 remote_ptr get_from_float_file(uint64_t offset, uint64_t len) {
-  FILE *f = fopen("../../model/gpt_neo/prose_input.raw", "r");
-  if (f == nullptr) {
+  int fno = open("../../model/gpt_neo/prose_input.raw", O_RDWR);
+  if (fno == -1) {
     throw std::runtime_error("Cannot open ../../model/gpt_neo/prose_input.raw");
   }
   auto fptr =
-      mmap(nullptr, len, PROT_READ, MAP_SHARED | MAP_FILE, fileno(f), offset);
+      mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FILE, fno, offset);
   remote_ptr ptr = handle.malloc(len);
   memcpy(ptr.getHostAddr(), fptr, len);
   munmap(fptr, len);
+  close(fno);
   return ptr;
 }
 AllLayers all_layers;

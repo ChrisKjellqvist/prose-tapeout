@@ -135,12 +135,12 @@ void convertPCMtoTCM(const uint16_t *in, std::variant<uint16_t *, float *> out,
 
 #define IS_BIGENDIAN (*(uint16_t *)"\0\xff" < 0x100)
 
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <sys/mman.h>
-#include <unistd.h>
 #include <sys/stat.h>
-#include <cstdio>
+#include <unistd.h>
 
 #ifndef BAREMETAL
 
@@ -149,11 +149,11 @@ const int seq_len_for_mask = 16;
 void write_to_file(
     const std::string &filename_prefix,
     const std::vector<std::pair<uint16_t *, int>> &data,
-    std::optional<std::pair<std::string, std::vector<std::string>>>
-        index_writeout) {
+    std::pair<std::string, std::vector<std::string>> index_writeout) {
   FILE *fstrm = fopen((filename_prefix + ".strm").c_str(), "wb+");
   remove((filename_prefix + ".raw").c_str());
-  int fraw = open((filename_prefix + ".raw").c_str(), O_RDWR | O_CREAT | O_SYNC);
+  int fraw =
+      open((filename_prefix + ".raw").c_str(), O_RDWR | O_CREAT | O_SYNC);
   chmod((filename_prefix + ".raw").c_str(), S_IWUSR | S_IRUSR);
   std::vector<std::pair<uintptr_t, uint64_t>> index;
   if (!fstrm) {
@@ -174,14 +174,31 @@ void write_to_file(
   }
   ftruncate(fraw, max_addr);
   uint8_t *raw_file = (uint8_t *)mmap(nullptr, max_addr, PROT_READ | PROT_WRITE,
-                               MAP_SHARED | MAP_FILE, fraw, 0);
+                                      MAP_SHARED | MAP_FILE, fraw, 0);
   if (raw_file == MAP_FAILED) {
     printf("ERROR: mmap fail: %s. %d, %d\n", strerror(errno), max_addr, fraw);
     throw std::runtime_error("MMAP FAIL");
   }
 
+  FILE *f = fopen(index_writeout.first.c_str(), "w");
+  FILE *rp = fopen("prose_rptr.h", "w");
+  FILE *rc = fopen("prose_rptr.cc", "w");
+  fprintf(rc, "#include \"prose_rptr.h\"\n#ifdef LOCAL\n");
+  fprintf(rp, "#ifndef PROSE_RPTR_H\n#define PROSE_RPTR_H\n");
+  fprintf(rp, "#include <cstdint>\n");
+  fprintf(
+      rp,
+      "#ifdef LOCAL\n#include <beethoven/allocator/alloc.h>\n#else\n#include "
+      "<beethoven_baremetal/allocator/alloc_baremetal.h>\n#endif\n");
+  fprintf(rp, "#include \"prose_lib.h\"\nvoid init_rptr();\n");
+  if (!f) {
+    printf("Failed to open file %s\n", index_writeout.first.c_str());
+    return;
+  }
+
   // always write out data in littlendian format
-  for (auto &d : data) {
+  for (int i = 0; i < data.size(); ++i) {
+    auto &d = data[i];
     auto dptr = d.first;
     index.push_back(std::make_pair(addr, d.second));
     if (IS_BIGENDIAN) {
@@ -193,13 +210,27 @@ void write_to_file(
       delete[] swapped;
     }
     fprintf(fstrm, "@%lx\n", addr);
+    fprintf(f, "%s offset(%lx) len(%llx)\n",
+            index_writeout.second[i].c_str(),
+            addr,
+            d.second);
+    // replace all "." in name with "_"
+    std::string name = index_writeout.second[i];
+    std::replace(name.begin(), name.end(), '.', '_');
+    fprintf(rp,
+            "__ptr_annot__ beethoven::remote_ptr %s "
+            "PTR_FROM_OFFSET_H(0x%lxL, 0x%llxL);\n",
+            name.c_str(), index[i].first, index[i].second * 2);
+    fprintf(rc, "beethoven::remote_ptr %s;\n", name.c_str(), index[i].first,
+            index[i].second * 2);
+
     // memcpy(raw_file + addr, dptr, d.second * 2);
     printf("copy ADDR[%p] LEN[%x]\n", addr, d.second * 2);
     for (int i = 0; i < d.second; ++i) {
       for (int j = 0; j < 2; ++j) {
         uint8_t q = 0xFF & (dptr[i] >> (8 * j));
         fprintf(fstrm, "%02x ", q);
-        uint8_t &entry = (raw_file + addr)[i*2 + j];
+        uint8_t &entry = (raw_file + addr)[i * 2 + j];
         entry = q;
         if (entry != q) {
           printf("INSANITY: EXPECTED[%x] SEEN[%x]\n", q, entry);
@@ -223,56 +254,24 @@ void write_to_file(
   close(fraw);
   munmap(raw_file, max_addr);
 
-  if (index_writeout) {
-    FILE *f = fopen(index_writeout.value().first.c_str(), "w");
-    FILE *rp = fopen("prose_rptr.h", "w");
-    FILE *rc = fopen("prose_rptr.cc", "w");
-    fprintf(rc, "#include \"prose_rptr.h\"\n#ifdef LOCAL\n");
-    fprintf(rp, "#ifndef PROSE_RPTR_H\n#define PROSE_RPTR_H\n");
-    fprintf(rp, "#include <cstdint>\n");
-    fprintf(
-        rp,
-        "#ifdef LOCAL\n#include <beethoven/allocator/alloc.h>\n#else\n#include "
-        "<beethoven_baremetal/allocator/alloc_baremetal.h>\n#endif\n");
-    fprintf(rp, "#include \"prose_lib.h\"\nvoid init_rptr();\n");
-    if (!f) {
-      printf("Failed to open file %s\n", index_writeout.value().first.c_str());
-      return;
-    }
-
-    for (int i = 0; i < index.size(); ++i) {
-      fprintf(f, "%s offset(%lx) len(%llx)\n",
-              index_writeout.value().second[i].c_str(), index[i].first,
-              index[i].second);
-      // replace all "." in name with "_"
-      std::string name = index_writeout.value().second[i];
-      std::replace(name.begin(), name.end(), '.', '_');
-      fprintf(rp,
-              "__ptr_annot__ beethoven::remote_ptr %s "
-              "PTR_FROM_OFFSET_H(0x%lxL, 0x%llxL);\n",
-              name.c_str(), index[i].first, index[i].second * 2);
-      fprintf(rc, "beethoven::remote_ptr %s;\n", name.c_str(), index[i].first,
-              index[i].second * 2);
-    }
-    fprintf(rc, "void init_rptr() {");
-    for (int i = 0; i < index.size(); ++i) {
-      fprintf(f, "%s offset(%lx) len(%llx)\n",
-              index_writeout.value().second[i].c_str(), index[i].first,
-              index[i].second);
-      // replace all "." in name with "_"
-      std::string name = index_writeout.value().second[i];
-      std::replace(name.begin(), name.end(), '.', '_');
-      fprintf(rc, "%s PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n", name.c_str(),
-              index[i].first, index[i].second * 2);
-    }
-    fprintf(rc, "}\n");
-    fprintf(rc, "#endif");
-    fprintf(rp, "constexpr uint32_t allocator_base(0x%lx);\n", addr);
-    fprintf(rp, "#endif\n");
-    fprintf(f, "END: %lx\n", addr);
-    fclose(f);
-    fclose(rp);
+  fprintf(rc, "void init_rptr() {");
+  for (int i = 0; i < index.size(); ++i) {
+    fprintf(f, "%s offset(%lx) len(%llx)\n",
+            index_writeout.second[i].c_str(), index[i].first,
+            index[i].second);
+    // replace all "." in name with "_"
+    std::string name = index_writeout.second[i];
+    std::replace(name.begin(), name.end(), '.', '_');
+    fprintf(rc, "%s PTR_FROM_OFFSET_C(0x%lxL, 0x%llxL);\n", name.c_str(),
+            index[i].first, index[i].second * 2);
   }
+  fprintf(rc, "}\n");
+  fprintf(rc, "#endif");
+  fprintf(rp, "constexpr uint32_t allocator_base(0x%lx);\n", addr);
+  fprintf(rp, "#endif\n");
+  fprintf(f, "END: %lx\n", addr);
+  fclose(f);
+  fclose(rp);
 }
 
 #endif
